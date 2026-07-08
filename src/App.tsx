@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   GraduationCap, 
@@ -18,7 +18,9 @@ import {
   Clock,
   ExternalLink,
   ChevronRight,
-  Database
+  Database,
+  Moon,
+  Sun
 } from 'lucide-react';
 
 import FormSection from './components/FormSection';
@@ -40,6 +42,20 @@ export default function App() {
   
   // Back-and-forth query sharing state
   const [selectedStudentId, setSelectedStudentId] = useState('');
+
+  const [darkMode, setDarkMode] = useState(() => {
+    return localStorage.getItem('darkMode') === 'true';
+  });
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark-theme');
+      localStorage.setItem('darkMode', 'true');
+    } else {
+      document.documentElement.classList.remove('dark-theme');
+      localStorage.setItem('darkMode', 'false');
+    }
+  }, [darkMode]);
 
   // Toast utility helper
   const showToast = (message: string, type: ToastType = 'info') => {
@@ -87,8 +103,8 @@ export default function App() {
       )}
 
       {/* Primary Header */}
-      <header className="bg-mangosteen/95 backdrop-blur-md text-white sticky top-0 z-30 shadow-lg border-b border-mangosteen-dark/20">
-        <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <header className="bg-white/80 backdrop-blur-xl sticky top-0 z-30 border-b border-slate-200 transition-all duration-300">
+        <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           
           {/* Logo & title click resets or targets reserve page */}
           <div 
@@ -99,17 +115,17 @@ export default function App() {
             className="flex items-center gap-3 cursor-pointer group select-none"
             id="brand-header-logo"
           >
-            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-mangosteen font-bold text-xl shadow-md transition-transform transform group-hover:scale-105">
+            <div className="w-10 h-10 bg-mangosteen/10 text-mangosteen rounded-2xl flex items-center justify-center font-black text-xl transition-all duration-300 group-hover:bg-mangosteen group-hover:text-white group-hover:rotate-3 group-hover:scale-105">
               Sci
             </div>
             <div>
-              <h1 className="text-md sm:text-lg font-bold font-sans tracking-tight text-white flex items-center gap-1.5 leading-tight">
+              <h1 className="text-md sm:text-lg font-black font-sans tracking-tight text-slate-800 flex items-center gap-1.5 leading-tight">
                 {t('systemTitle')}
-                <span className="text-[10px] font-bold text-white bg-white/20 border border-white/30 px-1.5 py-0.2 rounded-sm uppercase tracking-wider">
+                <span className="text-[10px] font-bold text-mangosteen bg-mangosteen/10 px-1.5 py-0.5 rounded-md uppercase tracking-wider">
                   FST
                 </span>
               </h1>
-              <p className="text-[10px] font-semibold text-white/70 font-sans tracking-wide uppercase">
+              <p className="text-[10px] font-semibold text-slate-500 font-sans tracking-wide uppercase">
                 {t('fstSubtitle')}
               </p>
             </div>
@@ -118,20 +134,20 @@ export default function App() {
           {/* Navigation Control Group */}
           <div className="flex flex-wrap items-center gap-3 sm:gap-4 self-stretch sm:self-auto justify-between sm:justify-end">
             {/* Regular Student Toggle Tabs */}
-            <div className="flex items-center gap-1 bg-white/10 p-1 rounded-xl border border-white/10" id="student-navigation-tabs">
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200/50" id="student-navigation-tabs">
               <button
                 onClick={() => {
                   setLatestSubmission(null);
                   setActiveTab('reserve');
                 }}
-                className={`py-2 px-3 sm:py-2 sm:px-4 text-xs font-semibold font-sans rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+                className={`py-2 px-3 sm:py-2 sm:px-4 text-xs font-semibold font-sans rounded-xl transition-all duration-300 flex items-center gap-2 cursor-pointer ${
                   activeTab === 'reserve'
-                    ? 'bg-white text-mangosteen shadow-md'
-                    : 'text-white/80 hover:bg-white/10 hover:text-white'
+                    ? 'bg-white text-mangosteen shadow-sm border border-slate-200/50'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
                 }`}
                 id="tab-btn-reserve"
               >
-                <FileText className="w-3.5 h-3.5" />
+                <FileText className="w-4 h-4" />
                 {t('tabReserve')}
               </button>
               <button
@@ -139,30 +155,26 @@ export default function App() {
                   setLatestSubmission(null);
                   setActiveTab('status');
                 }}
-                className={`py-2 px-3 sm:py-2 sm:px-4 text-xs font-semibold font-sans rounded-lg transition-all flex items-center gap-2 cursor-pointer relative group ${
+                className={`py-2 px-3 sm:py-2 sm:px-4 text-xs font-semibold font-sans rounded-xl transition-all duration-300 flex items-center gap-2 cursor-pointer relative group ${
                   activeTab === 'status'
-                    ? 'bg-white text-mangosteen shadow-md'
-                    : 'text-white/80 hover:bg-white/10 hover:text-white'
+                    ? 'bg-white text-mangosteen shadow-sm border border-slate-200/50'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
                 }`}
                 id="tab-btn-status"
               >
-                <Search className="w-3.5 h-3.5" />
+                <Search className="w-4 h-4" />
                 <span>{t('tabStatus')}</span>
-                <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
               </button>
             </div>
 
             {/* Academic-Standard Lang Toggle Switching Button Group */}
-            <div className="flex items-center bg-white/10 p-1 rounded-xl border border-white/10 text-white text-xs font-bold" id="language-switcher-group">
+            <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200/50 text-slate-500 text-xs font-bold" id="language-switcher-group">
               <button
                 onClick={() => setLanguage('th')}
-                className={`px-2.5 py-1.5 rounded-lg transition-all text-[11px] font-sans tracking-wider cursor-pointer ${
+                className={`px-2.5 py-1.5 rounded-xl transition-all duration-300 text-[11px] font-sans tracking-wider cursor-pointer ${
                   language === 'th' 
-                    ? 'bg-white text-mangosteen shadow-xs font-extrabold' 
-                    : 'text-white/70 hover:text-white hover:bg-white/5'
+                    ? 'bg-white text-mangosteen shadow-sm border border-slate-200/50 font-black' 
+                    : 'hover:text-slate-700 hover:bg-slate-200/50'
                 }`}
                 title="ภาษาไทย"
                 id="lang-btn-th"
@@ -171,10 +183,10 @@ export default function App() {
               </button>
               <button
                 onClick={() => setLanguage('en')}
-                className={`px-2.5 py-1.5 rounded-lg transition-all text-[11px] font-sans tracking-wider cursor-pointer ${
+                className={`px-2.5 py-1.5 rounded-xl transition-all duration-300 text-[11px] font-sans tracking-wider cursor-pointer ${
                   language === 'en' 
-                    ? 'bg-white text-mangosteen shadow-xs font-extrabold' 
-                    : 'text-white/70 hover:text-white hover:bg-white/5'
+                    ? 'bg-white text-mangosteen shadow-sm border border-slate-200/50 font-black' 
+                    : 'hover:text-slate-700 hover:bg-slate-200/50'
                 }`}
                 title="English Language"
                 id="lang-btn-en"
@@ -190,10 +202,10 @@ export default function App() {
                   setLatestSubmission(null);
                   setActiveTab('admin');
                 }}
-                className={`px-4 py-1.5 rounded-full text-xs font-bold font-sans flex items-center gap-1.5 transition-all cursor-pointer border ${
+                className={`px-4 py-2 rounded-2xl text-xs font-bold font-sans flex items-center gap-2 transition-all duration-300 cursor-pointer border ${
                   activeTab === 'admin'
-                    ? 'bg-white text-mangosteen border-white shadow-md'
-                    : 'text-white/80 border-white/30 hover:bg-white hover:text-mangosteen'
+                    ? 'bg-mangosteen text-white border-mangosteen shadow-md shadow-mangosteen/20'
+                    : 'text-slate-500 border-slate-200 hover:bg-slate-50 hover:text-slate-800'
                 }`}
                 id="btn-trigger-staff-admin"
                 title="สำหรับเจ้าหน้าที่คณะเท่านั้น"
@@ -202,6 +214,15 @@ export default function App() {
                 {t('tabAdmin')}
               </button>
             </div>
+            
+            {/* Dark Mode Toggle */}
+            <button
+              onClick={() => setDarkMode(!darkMode)}
+              className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 rounded-full transition-colors cursor-pointer"
+              title="สลับโหมดหน้าจอ"
+            >
+              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
           </div>
 
         </div>
@@ -219,58 +240,42 @@ export default function App() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-xl mx-auto bg-white rounded-3xl p-6 sm:p-8 border border-slate-100/90 shadow-2xl space-y-6 text-center"
+              className="w-full max-w-md mx-auto bg-white rounded-3xl p-8 sm:p-10 border border-slate-100 shadow-xl space-y-6 text-center"
               id="form-submission-success-page"
             >
-              <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-xs border border-emerald-100 animate-bounce">
+              <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-xs border border-emerald-100 mb-2">
                 <CheckCircle className="w-10 h-10" />
               </div>
               
-              <div className="space-y-2">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-200">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  {t('successProjectDone')}
-                </div>
-                <h3 className="text-xl sm:text-2xl font-bold text-slate-800 font-sans tracking-tight">
-                  {t('successSubmitted')}
+              <div className="space-y-3">
+                <h3 className="text-2xl font-black text-slate-800 font-sans tracking-tight">
+                  ได้รับคำร้องแล้ว
                 </h3>
-              </div>
-
-              {/* Box Details Card */}
-              <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 text-left space-y-3 font-sans">
-                <div className="text-xs text-slate-400 flex justify-between">
-                  <span>{t('successRef')}</span>
-                  <strong className="font-mono text-slate-700 font-bold">{latestSubmission.request.id}</strong>
-                </div>
-                <div className="border-t border-slate-200/50 pt-2.5 space-y-1.5 text-xs text-slate-600">
-                  <p>• <strong>{t('successApplicant')}</strong> {latestSubmission.request.fullName} (รหัส {latestSubmission.request.studentId})</p>
-                  <p>• <strong>{t('successCourse')}</strong> {latestSubmission.request.courseCode} - {latestSubmission.request.courseName}</p>
-                  <p>• <strong>{t('successSec')}</strong> {isTh ? `เซกชัน ${latestSubmission.request.section}` : `Section ${latestSubmission.request.section}`} ({isTh ? `อาจารย์ ${latestSubmission.request.instructor}` : `Instructor: ${latestSubmission.request.instructor}`})</p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <p className="text-xs sm:text-sm text-slate-500 font-sans leading-relaxed max-w-md mx-auto">
-                  {t('successDetail')}
+                <p className="text-sm text-slate-500 font-sans leading-relaxed">
+                  ระบบได้บันทึกคำร้องของคุณเรียบร้อยแล้ว<br/>เจ้าหน้าที่จะทำการพิจารณาตามลำดับคิว
                 </p>
-
-                <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                  <button
-                    onClick={() => setLatestSubmission(null)}
-                    className="flex-1 py-3 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-600 font-sans font-semibold rounded-xl text-sm transition-colors cursor-pointer"
-                    id="btn-return-submit-again"
-                  >
-                    {t('successSubmitAnother')}
-                  </button>
-                  <button
-                    onClick={() => handleViewStatusAfterSubmit(latestSubmission.studentId)}
-                    className="flex-1 py-3 bg-mangosteen hover:bg-mangosteen-hover text-white font-sans font-semibold rounded-xl text-sm shadow-md shadow-mangosteen/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                    id="btn-go-check-status-direct"
-                  >
-                    {t('successGoStatus')}
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-50 text-slate-500 text-xs font-semibold rounded-lg border border-slate-200 mt-2">
+                  <span className="text-slate-400">รหัสอ้างอิง:</span>
+                  <strong className="font-mono text-slate-700">{latestSubmission.request.id}</strong>
                 </div>
+              </div>
+
+              <div className="pt-4 flex flex-col gap-3">
+                <button
+                  onClick={() => handleViewStatusAfterSubmit(latestSubmission.studentId)}
+                  className="w-full py-3.5 bg-mangosteen hover:bg-mangosteen-hover text-white font-sans font-bold rounded-xl text-sm shadow-md shadow-mangosteen/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  id="btn-go-check-status-direct"
+                >
+                  <Search className="w-4 h-4" />
+                  ตรวจสอบสถานะคำร้อง
+                </button>
+                <button
+                  onClick={() => setLatestSubmission(null)}
+                  className="w-full py-3 border border-slate-200 hover:bg-slate-50 text-slate-500 font-sans font-bold rounded-xl text-sm transition-colors cursor-pointer"
+                  id="btn-return-submit-again"
+                >
+                  ส่งคำร้องเพิ่มเติม
+                </button>
               </div>
             </motion.div>
           ) : (

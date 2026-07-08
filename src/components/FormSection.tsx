@@ -23,8 +23,69 @@ import {
   Trash2
 } from 'lucide-react';
 import { YEARS, ReservationRequest } from '../types';
-import { submitRequest } from '../services/api';
+import { submitRequest, getStatusByStudentId } from '../services/api';
 import { useTranslation } from '../contexts/LanguageContext';
+
+interface TypewriterTextProps {
+  text: string;
+  speed?: number;
+}
+
+const TypewriterText: React.FC<TypewriterTextProps> = ({ text, speed = 80 }) => {
+  const [displayedText, setDisplayedText] = useState('');
+
+  useEffect(() => {
+    let isMounted = true;
+    let intervalId: NodeJS.Timeout;
+    let timeoutId: NodeJS.Timeout;
+
+    const startTyping = () => {
+      if (!isMounted) return;
+      setDisplayedText('');
+      let i = 0;
+      
+      intervalId = setInterval(() => {
+        if (!isMounted) return;
+        
+        if (i < text.length) {
+          setDisplayedText(text.slice(0, i + 1));
+          i++;
+        } else {
+          clearInterval(intervalId);
+          // รอ 3.5 วินาที แล้วเริ่มต้นพิมพ์ใหม่วนลูป
+          timeoutId = setTimeout(() => {
+            if (isMounted) {
+              startTyping();
+            }
+          }, 3500);
+        }
+      }, speed);
+    };
+
+    startTyping();
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+      clearTimeout(timeoutId);
+    };
+  }, [text, speed]);
+
+  return (
+    <span className="inline-block relative">
+      {displayedText}
+      <motion.span
+        animate={{ opacity: [1, 0.15, 1] }}
+        transition={{
+          duration: 1.2,
+          repeat: Infinity,
+          ease: "easeInOut"
+        }}
+        className="inline-block w-[2px] h-[1.1em] bg-mangosteen ml-1.5 align-middle"
+      />
+    </span>
+  );
+};
 
 const FACULTIES_DATA = {
   'คณะวิทยาศาสตร์และเทคโนโลยี': {
@@ -89,7 +150,7 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
   // Field states
   const [fullName, setFullName] = useState('');
   const [studentId, setStudentId] = useState('');
-  const [faculty, setFaculty] = useState('คณะวิทยาศาสตร์และเทคโนโลยี');
+  const [faculty, setFaculty] = useState('');
   const [department, setDepartment] = useState('');
   const [isDeptDropdownOpen, setIsDeptDropdownOpen] = useState(false);
   const [year, setYear] = useState('');
@@ -101,6 +162,11 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
   const [facebookProofFile, setFacebookProofFile] = useState<{ name: string; type: string; dataUrl: string } | null>(null);
   const [phone, setPhone] = useState('');
   const [consent, setConsent] = useState(true);
+
+  // Flow states
+  const [step, setStep] = useState<1 | 2>(1);
+  const [checkingStudentId, setCheckingStudentId] = useState(false);
+  const [hasProfile, setHasProfile] = useState(false);
 
   // Errors feedback (touched validation)
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -150,6 +216,7 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
     } else if (!isStudentIdValid(studentId)) {
       errors.studentId = t('errStudentIdValid');
     }
+    if (!faculty) errors.faculty = isTh ? 'กรุณาเลือกคณะ' : 'Please select a faculty';
     if (!department) errors.department = t('errDepartment');
     if (!year) errors.year = t('errYear');
 
@@ -243,6 +310,58 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
     setFacebookProofFile(null);
   };
 
+  const handleCheckStudentId = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTouched({ studentId: true });
+    
+    if (!studentId.trim() || !isStudentIdValid(studentId)) {
+      showToast(isTh ? 'กรุณากรอกรหัสนักศึกษา 9 หลักให้ถูกต้อง' : 'Please enter a valid 9-digit student ID', 'warning');
+      return;
+    }
+
+    setCheckingStudentId(true);
+    try {
+      const res = await getStatusByStudentId(studentId);
+      setTouched({}); // Reset touched state for step 2
+      if (res.success && res.data && res.data.length > 0) {
+        // found past records! Pre-fill latest info
+        const latest = res.data[0];
+        setFullName(String(latest.fullName || ''));
+        setFaculty(String(latest.faculty || ''));
+        setDepartment(String(latest.department || ''));
+        setYear(String(latest.year || ''));
+        setPhone(String(latest.phone || ''));
+        setHasProfile(true);
+      } else {
+        setFullName('');
+        setFaculty('');
+        setDepartment('');
+        setYear('');
+        setPhone('');
+        setCourses([{ courseCode: '', courseName: '', section: '', instructor: '' }]);
+        setFacebookProofLink('');
+        setFacebookProofFile(null);
+        setHasProfile(false);
+      }
+      setStep(2);
+    } catch (err) {
+      // In case of error (maybe first time or network issue), still go to step 2 but they need to fill in manually
+      setFullName('');
+      setFaculty('');
+      setDepartment('');
+      setYear('');
+      setPhone('');
+      setCourses([{ courseCode: '', courseName: '', section: '', instructor: '' }]);
+      setFacebookProofLink('');
+      setFacebookProofFile(null);
+      setHasProfile(false);
+      setTouched({});
+      setStep(2);
+    } finally {
+      setCheckingStudentId(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const submitTouched: Record<string, boolean> = {
@@ -318,80 +437,38 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
     >
       <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
         {/* Banner header inside the card - Clean Minimalism Accent Line */}
-        <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center space-x-2.5 mb-2">
-                <div className="w-1.5 h-6 bg-mangosteen rounded-full"></div>
-                <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-mangosteen font-sans">{t('formTitle')}</h2>
+        {step !== 1 && (
+          <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center space-x-2.5 mb-2">
+                  <div className="w-1.5 h-6 bg-mangosteen rounded-full"></div>
+                  <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-mangosteen font-sans">{t('formTitle')}</h2>
+                </div>
+                <p className="text-slate-600 text-xs sm:text-sm font-sans tracking-wide">
+                  {t('formSubtitle')}
+                </p>
               </div>
-              <p className="text-slate-600 text-xs sm:text-sm font-sans tracking-wide">
-                {t('formSubtitle')}
-              </p>
-            </div>
-
-            {/* Highly clickable CTA banner pointing to status check */}
-            <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-3 flex sm:flex-row flex-col sm:items-center justify-between gap-3 shrink-1 shadow-sm">
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-2.5 w-2.5 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
-                </span>
-                <span className="text-xs sm:text-sm font-bold text-amber-800 font-sans">
-                  {isTh ? 'ยื่นแบบฟอร์มแล้ว? มีปุ่มสำหรับติดตามประวัติและวิชาที่ยื่นได้ทันที' : 'Already submitted? Track your reservation status.'}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const checkBtn = document.getElementById('tab-btn-status');
-                  if (checkBtn) checkBtn.click();
-                }}
-                className="text-xs font-extrabold text-amber-900 bg-white hover:bg-amber-100/50 px-3 py-1.5 rounded-lg border border-amber-300 transition-all cursor-pointer shadow-xs active:scale-95 font-sans"
-              >
-                {isTh ? 'เช็คสถานะผลที่นี่ →' : 'Track Here →'}
-              </button>
             </div>
           </div>
-        </div>
+        )}
 
-        <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-8" id="scitech-reserve-form">
-          {/* Section 1: ข้อมูลนักศึกษา */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-100 pb-2 mb-4">
-              <User className="w-4 h-4 text-mangosteen" />
-              <h3 className="font-bold text-sm text-slate-800 font-sans tracking-wide">{t('sectionApplicant')}</h3>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* ชื่อ-นามสกุล */}
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5 font-sans">
-                  {t('fullNameLabel')} <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={e => setFullName(e.target.value)}
-                    onBlur={() => handleBlur('fullName')}
-                    placeholder={isTh ? 'เช่น นายสุขใจ เรียนดี' : 'e.g., Muhammad Zakariya'}
-                    className={`w-full px-4 py-2.5 rounded-lg border text-sm sm:text-base font-medium font-sans transition-all focus:outline-hidden focus:ring-2 ${
-                      touched.fullName && validationErrors.fullName
-                        ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/20'
-                        : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/15'
-                    }`}
-                    id="input-fullName"
-                  />
+        <form onSubmit={step === 1 ? handleCheckStudentId : handleSubmit} className={`${step === 1 ? 'p-5 sm:p-8 space-y-4 sm:space-y-6' : 'p-6 md:p-8 space-y-8'}`} id="scitech-reserve-form">
+          {step === 1 ? (
+            <div className="space-y-4 sm:space-y-6">
+              <div className="text-center">
+                <div className="mx-auto w-12 h-12 sm:w-16 sm:h-16 bg-mangosteen/10 rounded-full flex items-center justify-center mb-2.5 sm:mb-4">
+                  <User className="w-6 h-6 sm:w-8 sm:h-8 text-mangosteen" />
                 </div>
-                {touched.fullName && validationErrors.fullName && (
-                  <p className="mt-1 text-xs text-rose-500 font-sans font-medium">{validationErrors.fullName}</p>
-                )}
+                <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-mangosteen font-sans mb-1">{t('formTitle')}</h2>
+                <h3 className="text-sm sm:text-base font-bold text-slate-700 font-sans min-h-[1.5rem] flex items-center justify-center">
+                  <TypewriterText text={isTh ? 'กรอกรหัสนักศึกษาเพื่อเริ่มต้น' : 'Enter Student ID to Start'} speed={75} />
+                </h3>
+                <p className="text-slate-500 text-xs sm:text-sm mt-0.5">{isTh ? 'ระบบจะตรวจสอบข้อมูลส่วนตัวของคุณจากฐานข้อมูล' : 'We will check your profile in our database'}</p>
               </div>
 
-              {/* รหัสนักศึกษา */}
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5 font-sans">
+              <div className="max-w-xs mx-auto">
+                <label className="block text-xs sm:text-sm font-semibold text-slate-600 mb-1 sm:mb-1.5 font-sans text-center">
                   {t('studentIdLabel')} <span className="text-rose-500">*</span>
                 </label>
                 <input
@@ -401,14 +478,126 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
                   onChange={e => setStudentId(e.target.value.replace(/\D/g, ''))}
                   onBlur={() => handleBlur('studentId')}
                   placeholder="650109121"
-                  className={`w-full px-4 py-2.5 rounded-lg border text-sm sm:text-base font-medium font-sans tracking-wide transition-all focus:outline-hidden focus:ring-2 ${
+                  className={`w-full px-4 py-2.5 sm:py-3 rounded-xl border-2 text-center text-md sm:text-lg font-bold font-sans tracking-widest transition-all focus:outline-hidden focus:ring-4 ${
                     touched.studentId && validationErrors.studentId
-                      ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/20'
-                      : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/15'
+                      ? 'border-rose-300 focus:ring-rose-200 focus:border-rose-400 bg-rose-50/20 text-rose-700'
+                      : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/20 text-slate-700'
                   }`}
-                  id="input-studentId"
+                  id="input-studentId-step1"
+                  autoFocus
                 />
                 {touched.studentId && validationErrors.studentId && (
+                  <p className="mt-1.5 text-xs text-rose-500 font-sans font-medium text-center">{validationErrors.studentId}</p>
+                )}
+              </div>
+
+              <div className="pt-2 sm:pt-4 flex justify-center">
+                <button
+                  type="submit"
+                  disabled={checkingStudentId || !studentId.trim()}
+                  className="w-full max-w-xs py-2.5 sm:py-3 px-6 bg-mangosteen hover:bg-mangosteen-light text-white font-bold font-sans rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer text-sm sm:text-base"
+                >
+                  {checkingStudentId ? (
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <>
+                      {isTh ? 'ถัดไป' : 'Next'}
+                      <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Section 1: ข้อมูลนักศึกษา */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-4">
+                  <div className="flex items-center gap-2">
+                    <User className="w-4 h-4 text-mangosteen" />
+                    <h3 className="font-bold text-sm text-slate-800 font-sans tracking-wide">{t('sectionApplicant')}</h3>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      setFullName('');
+                      setFaculty('');
+                      setDepartment('');
+                      setYear('');
+                      setPhone('');
+                      setCourses([{ courseCode: '', courseName: '', section: '', instructor: '' }]);
+                      setFacebookProofLink('');
+                      setFacebookProofFile(null);
+                      setHasProfile(false);
+                      setTouched({});
+                      setStep(1);
+                    }}
+                    className="text-xs text-slate-500 hover:text-mangosteen font-semibold transition-colors flex items-center gap-1 cursor-pointer bg-slate-50 hover:bg-slate-100 px-2 py-1 rounded-md"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    {isTh ? 'เปลี่ยนรหัสนักศึกษา' : 'Change ID'}
+                  </button>
+                </div>
+
+                {hasProfile && (
+                  <div className="bg-emerald-50 text-emerald-700 p-3 rounded-lg flex items-start gap-2 text-sm font-sans mb-4 border border-emerald-200/50">
+                    <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div>
+                      <strong>{isTh ? 'พบประวัติข้อมูลของคุณ' : 'Profile found!'}</strong>
+                      <p className="opacity-90 text-xs mt-0.5">
+                        {isTh ? 'เราได้กรอกข้อมูลส่วนตัวให้คุณแล้ว คุณสามารถแก้ไขได้หรือข้ามไปเลือกรายวิชาได้เลย' : 'We have pre-filled your personal info. You can edit it or skip directly to selecting courses.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* ชื่อ-นามสกุล */}
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1.5 font-sans">
+                      {t('fullNameLabel')} <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={fullName}
+                        onChange={e => setFullName(e.target.value)}
+                        onBlur={() => handleBlur('fullName')}
+                        placeholder={isTh ? 'เช่น นายสุขใจ เรียนดี' : 'e.g., Muhammad Zakariya'}
+                        className={`w-full px-4 py-3 rounded-xl border-2 bg-slate-50 hover:bg-white text-sm sm:text-base font-medium font-sans transition-all focus:outline-hidden focus:ring-4 ${
+                          touched.fullName && validationErrors.fullName
+                            ? 'border-rose-300 focus:ring-rose-200 focus:border-rose-400 bg-rose-50/20 text-rose-700'
+                            : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/20 text-slate-700'
+                        }`}
+                        id="input-fullName"
+                      />
+                    </div>
+                    {touched.fullName && validationErrors.fullName && (
+                      <p className="mt-1 text-xs text-rose-500 font-sans font-medium">{validationErrors.fullName}</p>
+                    )}
+                  </div>
+
+                  {/* รหัสนักศึกษา (Read-only in step 2 usually, but let them edit if they want) */}
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1.5 font-sans">
+                      {t('studentIdLabel')} <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={9}
+                      value={studentId}
+                      onChange={e => setStudentId(e.target.value.replace(/\D/g, ''))}
+                      onBlur={() => handleBlur('studentId')}
+                      placeholder="650109121"
+                      className={`w-full px-4 py-3 rounded-xl border-2 text-sm sm:text-base font-medium font-sans tracking-wide transition-all focus:outline-hidden focus:ring-4 ${
+                        touched.studentId && validationErrors.studentId
+                          ? 'border-rose-300 focus:ring-rose-200 focus:border-rose-400 bg-rose-50/20 text-rose-700'
+                          : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/20 bg-slate-100 text-slate-500'
+                      }`}
+                      id="input-studentId"
+                      readOnly
+                    />
+                    {touched.studentId && validationErrors.studentId && (
                   <p className="mt-1 text-xs text-rose-500 font-sans font-medium">{validationErrors.studentId}</p>
                 )}
               </div>
@@ -450,6 +639,9 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
                     );
                   })}
                 </div>
+                {touched.faculty && validationErrors.faculty && (
+                  <p className="mt-1 text-xs text-rose-500 font-sans font-medium">{validationErrors.faculty}</p>
+                )}
               </div>
 
               {/* สาขาวิชา ( updates based on selected faculty ) */}
@@ -461,6 +653,7 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
                   const isSciTech = faculty === 'คณะวิทยาศาสตร์และเทคโนโลยี';
                   const isIslamic = faculty === 'คณะอิสลามศึกษาและนิติศาสตร์';
                   const isLiberal = faculty === 'คณะศิลปศาสตร์และสังคมศาสตร์';
+                  const isEdu = faculty === 'คณะศึกษาศาสตร์';
 
                   const facultyTheme = isSciTech ? {
                     accent: 'border-l-mangosteen',
@@ -483,24 +676,37 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
                     activeText: 'text-orange-700',
                     itemHover: 'hover:bg-orange-50/50 hover:text-orange-850',
                     selectedBg: 'bg-orange-50/50 text-orange-850 text-orange-800 font-medium'
-                  } : {
+                  } : isEdu ? {
                     accent: 'border-l-purple-600',
                     focusRing: 'focus:ring-purple-600/15',
                     focusBorder: 'focus:border-purple-600',
                     activeText: 'text-purple-700',
                     itemHover: 'hover:bg-purple-50 hover:text-purple-850 hover:text-purple-800',
                     selectedBg: 'bg-purple-50 text-purple-850 text-purple-800 font-medium'
+                  } : {
+                    accent: 'border-l-slate-300',
+                    focusRing: 'focus:ring-slate-200/50',
+                    focusBorder: 'focus:border-slate-300',
+                    activeText: 'text-slate-500',
+                    itemHover: 'hover:bg-slate-50',
+                    selectedBg: 'bg-slate-50'
                   };
 
                   return (
                     <div className="relative font-sans">
                       <button
                         type="button"
-                        onClick={() => setIsDeptDropdownOpen(!isDeptDropdownOpen)}
-                        className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg border text-sm sm:text-base font-medium font-sans bg-white transition-all text-left border-l-4 cursor-pointer ${facultyTheme.accent} ${
+                        onClick={() => {
+                          if (!faculty) {
+                            showToast(isTh ? 'กรุณาเลือกคณะก่อนเลือกสาขาวิชา' : 'Please select a faculty first', 'warning');
+                            return;
+                          }
+                          setIsDeptDropdownOpen(!isDeptDropdownOpen);
+                        }}
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 hover:bg-slate-50 text-sm sm:text-base font-medium font-sans bg-white transition-all text-left border-l-4 cursor-pointer ${facultyTheme.accent} ${
                           touched.department && validationErrors.department
-                            ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/20'
-                            : `border-slate-200 focus:outline-hidden focus:ring-2 ${facultyTheme.focusRing} ${facultyTheme.focusBorder}`
+                            ? 'border-rose-300 focus:ring-rose-200 focus:border-rose-400 bg-rose-50/20 text-rose-700'
+                            : `border-slate-200 focus:outline-hidden focus:ring-4 ${facultyTheme.focusRing} ${facultyTheme.focusBorder}`
                         }`}
                         id="input-department-trigger"
                       >
@@ -599,10 +805,10 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
                   onChange={e => setPhone(e.target.value.replace(/\D/g, ''))}
                   onBlur={() => handleBlur('phone')}
                   placeholder={isTh ? '08xxxxxxxx' : 'e.g., 08xxxxxxxx'}
-                  className={`w-full px-4 py-2.5 rounded-lg border text-sm sm:text-base font-medium font-sans tracking-wide transition-all focus:outline-hidden focus:ring-2 ${
+                  className={`w-full px-4 py-3 rounded-xl border-2 text-sm sm:text-base font-medium font-sans tracking-wide transition-all focus:outline-hidden focus:ring-4 bg-slate-50 hover:bg-white ${
                     touched.phone && validationErrors.phone
-                      ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/20'
-                      : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/15'
+                      ? 'border-rose-300 focus:ring-rose-200 focus:border-rose-400 bg-rose-50/20 text-rose-700'
+                      : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/20 text-slate-700'
                   }`}
                   id="input-phone"
                 />
@@ -654,10 +860,10 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
                       onChange={e => handleCourseChange(index, 'courseCode', e.target.value.toUpperCase())}
                       onBlur={() => handleBlur(`courseCode_${index}`)}
                       placeholder={isTh ? 'เช่น IT2301-123' : 'e.g., IT2301-123'}
-                      className={`w-full px-4 py-2.5 rounded-lg border text-sm font-semibold tracking-wide font-sans transition-all focus:outline-hidden focus:ring-2 ${
+                      className={`w-full px-4 py-3 rounded-xl border-2 bg-slate-50 hover:bg-white text-sm font-semibold tracking-wide font-sans transition-all focus:outline-hidden focus:ring-4 ${
                         touched[`courseCode_${index}`] && validationErrors[`courseCode_${index}`]
-                          ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/20'
-                          : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/15'
+                          ? 'border-rose-300 focus:ring-rose-200 focus:border-rose-400 bg-rose-50/20 text-rose-700'
+                          : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/20 text-slate-700'
                       }`}
                     />
                     {touched[`courseCode_${index}`] && validationErrors[`courseCode_${index}`] && (
@@ -676,10 +882,10 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
                       onChange={e => handleCourseChange(index, 'courseName', e.target.value)}
                       onBlur={() => handleBlur(`courseName_${index}`)}
                       placeholder={isTh ? 'เช่น การออกแบบระบบข้อมูล' : 'e.g., Database Systems Design'}
-                      className={`w-full px-4 py-2.5 rounded-lg border text-sm font-medium font-sans transition-all focus:outline-hidden focus:ring-2 ${
+                      className={`w-full px-4 py-3 rounded-xl border-2 bg-slate-50 hover:bg-white text-sm font-medium font-sans transition-all focus:outline-hidden focus:ring-4 ${
                         touched[`courseName_${index}`] && validationErrors[`courseName_${index}`]
-                          ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/20'
-                          : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/15'
+                          ? 'border-rose-300 focus:ring-rose-200 focus:border-rose-400 bg-rose-50/20 text-rose-700'
+                          : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/20 text-slate-700'
                       }`}
                     />
                     {touched[`courseName_${index}`] && validationErrors[`courseName_${index}`] && (
@@ -698,10 +904,10 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
                       onChange={e => handleCourseChange(index, 'section', e.target.value)}
                       onBlur={() => handleBlur(`section_${index}`)}
                       placeholder={isTh ? 'เช่น กลุ่ม 01' : 'e.g., Section 1'}
-                      className={`w-full px-4 py-2.5 rounded-lg border text-sm font-medium font-sans transition-all focus:outline-hidden focus:ring-2 ${
+                      className={`w-full px-4 py-3 rounded-xl border-2 bg-slate-50 hover:bg-white text-sm font-medium font-sans transition-all focus:outline-hidden focus:ring-4 ${
                         touched[`section_${index}`] && validationErrors[`section_${index}`]
-                          ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/20'
-                          : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/15'
+                          ? 'border-rose-300 focus:ring-rose-200 focus:border-rose-400 bg-rose-50/20 text-rose-700'
+                          : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/20 text-slate-700'
                       }`}
                     />
                     {touched[`section_${index}`] && validationErrors[`section_${index}`] && (
@@ -720,10 +926,10 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
                       onChange={e => handleCourseChange(index, 'instructor', e.target.value)}
                       onBlur={() => handleBlur(`instructor_${index}`)}
                       placeholder={isTh ? 'เช่น ผศ.ดร.ใจดี มุ่งมั่น' : 'e.g., Asst. Prof. Dr. Muhammad Zakariya'}
-                      className={`w-full px-4 py-2.5 rounded-lg border text-sm font-medium font-sans transition-all focus:outline-hidden focus:ring-2 ${
+                      className={`w-full px-4 py-3 rounded-xl border-2 bg-slate-50 hover:bg-white text-sm font-medium font-sans transition-all focus:outline-hidden focus:ring-4 ${
                         touched[`instructor_${index}`] && validationErrors[`instructor_${index}`]
-                          ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/20'
-                          : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/15'
+                          ? 'border-rose-300 focus:ring-rose-200 focus:border-rose-400 bg-rose-50/20 text-rose-700'
+                          : 'border-slate-200 focus:border-mangosteen focus:ring-mangosteen/20 text-slate-700'
                       }`}
                     />
                     {touched[`instructor_${index}`] && validationErrors[`instructor_${index}`] && (
@@ -738,10 +944,12 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
             <button
               type="button"
               onClick={addCourseField}
-              className="w-full py-3.5 border-2 border-dashed border-slate-200 hover:border-mangosteen hover:text-mangosteen text-slate-500 hover:bg-slate-50/30 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 font-sans"
+              className="w-full py-4 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-sm font-bold rounded-xl shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2 font-sans hover:shadow active:scale-95"
             >
-              <Plus className="w-4 h-4" />
-              {isTh ? 'เพิ่มรายวิชาเรียนที่ต้องการสำรองอีก +' : 'Add another course details +'}
+              <div className="bg-emerald-100 p-1 rounded-md text-emerald-800">
+                <Plus className="w-5 h-5" />
+              </div>
+              {isTh ? 'เพิ่มรายวิชาเรียนที่ต้องการสำรองอีก' : 'Add another course details'}
             </button>
           </div>
 
@@ -912,13 +1120,9 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
           <div className="pt-4">
             <button
                type="submit"
-              disabled={isSubmitting || !isValidForm}
-              className={`w-full py-4 px-6 rounded-xl font-sans font-semibold text-white tracking-wide shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                isSubmitting 
-                  ? 'bg-slate-400 cursor-not-allowed shadow-none'
-                  : isValidForm
-                    ? 'bg-mangosteen hover:bg-mangosteen-hover active:scale-[0.99] shadow-mangosteen/25'
-                    : 'bg-slate-300 cursor-not-allowed shadow-none'
+              disabled={isSubmitting}
+              className={`w-full py-4 px-6 rounded-xl font-sans font-bold text-white tracking-wide shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer bg-mangosteen hover:bg-mangosteen-hover active:scale-[0.99] shadow-mangosteen/25 ${
+                isSubmitting ? 'bg-slate-400 cursor-not-allowed shadow-none opacity-50' : ''
               }`}
               id="btn-submit-request"
             >
@@ -943,6 +1147,8 @@ export default function FormSection({ onSuccess, showToast }: FormSectionProps) 
               </p>
             )}
           </div>
+          </>
+          )}
         </form>
       </div>
     </motion.div>

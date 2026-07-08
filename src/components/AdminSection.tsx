@@ -29,7 +29,7 @@ import {
   Settings
 } from 'lucide-react';
 import { ReservationRequest, RequestStatus } from '../types';
-import { adminLogin, getAllRequests, updateStatus, saveApiUrl, getApiUrl, isApiConfigured } from '../services/api';
+import { adminLogin, getAllRequests, updateStatus, updateCourseStatus, saveApiUrl, getApiUrl, isApiConfigured } from '../services/api';
 
 interface AdminSectionProps {
   isInitiallyLoggedIn: boolean;
@@ -63,6 +63,7 @@ export default function AdminSection({
 
   // Modals / Interactivity
   const [rejectionRequestId, setRejectionRequestId] = useState<string | null>(null);
+  const [rejectionCourseCode, setRejectionCourseCode] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [isSubmittingRejection, setIsSubmittingRejection] = useState(false);
 
@@ -174,6 +175,7 @@ function getSheet() {
       "รหัสนักศึกษา",
       "ชื่อ-นามสกุล",
       "ชั้นปี",
+      "คณะ",
       "สาขาวิชา",
       "รหัสวิชา",
       "ชื่อรายวิชา",
@@ -219,17 +221,18 @@ function doGet(e) {
               studentId: String(row[2]),
               fullName: row[3],
               year: String(row[4]),
-              department: row[5],
-              courseCode: row[6],
-              courseName: row[7],
-              section: row[8],
-              instructor: row[9],
-              phone: row[10],
-              proofType: row[11],
-              facebookProofLink: row[11] === "link" ? row[12] : "",
-              facebookProofFile: row[11] === "file" ? { name: "screenshot_profile_fb.png", type: "image/png", dataUrl: row[12] } : null,
-              status: row[13] || "รอดำเนินการ",
-              rejectionReason: row[14] || "",
+              faculty: row[5],
+              department: row[6],
+              courseCode: row[7],
+              courseName: row[8],
+              section: row[9],
+              instructor: row[10],
+              phone: row[11],
+              proofType: row[12],
+              facebookProofLink: row[12] === "link" ? row[13] : "",
+              facebookProofFile: row[12] === "file" ? { name: "screenshot_profile_fb.png", type: "image/png", dataUrl: row[13] } : null,
+              status: row[14] || "รอดำเนินการ",
+              rejectionReason: row[15] || "",
               courses: []
             };
           }
@@ -264,17 +267,18 @@ function doGet(e) {
             studentId: String(row[2]),
             fullName: row[3],
             year: String(row[4]),
-            department: row[5],
-            courseCode: row[6],
-            courseName: row[7],
-            section: row[8],
-            instructor: row[9],
-            phone: row[10],
-            proofType: row[11],
-            facebookProofLink: row[11] === "link" ? row[12] : "",
-            facebookProofFile: row[11] === "file" ? { name: "screenshot_profile_fb.png", type: "image/png", dataUrl: row[12] } : null,
-            status: row[13] || "รอดำเนินการ",
-            rejectionReason: row[14] || "",
+            faculty: row[5],
+            department: row[6],
+            courseCode: row[7],
+            courseName: row[8],
+            section: row[9],
+            instructor: row[10],
+            phone: row[11],
+            proofType: row[12],
+            facebookProofLink: row[12] === "link" ? row[13] : "",
+            facebookProofFile: row[12] === "file" ? { name: "screenshot_profile_fb.png", type: "image/png", dataUrl: row[13] } : null,
+            status: row[14] || "รอดำเนินการ",
+            rejectionReason: row[15] || "",
             courses: []
           };
         }
@@ -343,6 +347,7 @@ function doPost(e) {
           studentId,
           fullName,
           year,
+          faculty,
           department,
           course.courseCode,
           course.courseName,
@@ -408,6 +413,29 @@ function doPost(e) {
         out = { success: true };
       } else {
         out = { success: false, error: "ไม่พบรหัสคำร้องนี้ในระบบชีต" };
+      }
+    } else if (action === "updateCourseStatus") {
+      var requestId = postData.requestId;
+      var courseCode = postData.courseCode;
+      var status = postData.status;
+      var rejectionReason = postData.rejectionReason || "";
+      
+      var rows = sheet.getDataRange().getValues();
+      var updatedCount = 0;
+      
+      for (var i = 1; i < rows.length; i++) {
+        var row = rows[i];
+        if (row[0] === requestId && row[6] === courseCode) {
+          sheet.getRange(i + 1, 14).setValue(status);
+          sheet.getRange(i + 1, 15).setValue(rejectionReason);
+          updatedCount++;
+        }
+      }
+      
+      if (updatedCount > 0) {
+        out = { success: true };
+      } else {
+        out = { success: false, error: "ไม่พบรายวิชานี้ในคำร้อง" };
       }
     }
   } catch (err) {
@@ -483,7 +511,69 @@ function doPost(e) {
 
   const handleOpenRejectModal = (id: string) => {
     setRejectionRequestId(id);
+    setRejectionCourseCode(null);
     setRejectionReason('');
+  };
+
+  const handleRejectCourseModalOpen = (requestId: string, courseCode: string) => {
+    setRejectionRequestId(requestId);
+    setRejectionCourseCode(courseCode);
+    setRejectionReason('');
+  };
+
+  const handleApproveCourse = async (requestId: string, courseCode: string) => {
+    showToast(`กำลังบันทึกอนุมัติวิชา ${courseCode}...`, 'info');
+    try {
+      const result = await updateCourseStatus(requestId, courseCode, 'อนุมัติแล้ว');
+      if (result.success) {
+        showToast(`อนุมัติสิทธิ์รายวิชา ${courseCode} สำเร็จ`, 'success');
+        if (result.data) {
+          setRequests(prev => prev.map(req => req.id === requestId ? result.data! : req));
+        } else {
+          setRequests(prev => prev.map(req => {
+            if (req.id === requestId) {
+              const updatedCourses = req.courses.map(c => c.courseCode === courseCode ? { ...c, status: 'อนุมัติแล้ว' } : c);
+              const allApproved = updatedCourses.every(c => c.status === 'อนุมัติแล้ว');
+              let newStatus = req.status;
+              if (allApproved) newStatus = 'อนุมัติแล้ว';
+              return { ...req, courses: updatedCourses, status: newStatus };
+            }
+            return req;
+          }));
+        }
+      } else {
+        showToast(result.error || 'ไม่สามารถบันทึกได้', 'error');
+      }
+    } catch (err) {
+      showToast('เกิดข้อผิดพลาดในการเชื่อมต่อ', 'error');
+    }
+  };
+
+  const handleResetCourseToPending = async (requestId: string, courseCode: string) => {
+    if (window.confirm(`คุณต้องการเปลี่ยนสถานะรายวิชา ${courseCode} กลับสู่ "รอดำเนินการ" ใช่หรือไม่?`)) {
+      showToast(`กำลังปรับรายวิชา ${courseCode} โหมดการดำเนินการ...`, 'info');
+      try {
+        const result = await updateCourseStatus(requestId, courseCode, 'รอดำเนินการ');
+        if (result.success) {
+          showToast(`รีเซ็ตวิชา ${courseCode} กลับสู่รอดำเนินการสำเร็จ`, 'success');
+          if (result.data) {
+            setRequests(prev => prev.map(req => req.id === requestId ? result.data! : req));
+          } else {
+            setRequests(prev => prev.map(req => {
+              if (req.id === requestId) {
+                const updatedCourses = req.courses.map(c => c.courseCode === courseCode ? { ...c, status: 'รอดำเนินการ', rejectionReason: undefined } : c);
+                return { ...req, courses: updatedCourses, status: 'รอดำเนินการ' as RequestStatus };
+              }
+              return req;
+            }));
+          }
+        } else {
+          showToast(result.error || 'เกิดข้อผิดพลาดในการคืนสถานะ', 'error');
+        }
+      } catch (err) {
+        showToast('เกิดข้อผิดพลาดในการเชื่อมต่อ', 'error');
+      }
+    }
   };
 
   const handleConfirmRejectSubmit = async (e: React.FormEvent) => {
@@ -496,13 +586,43 @@ function doPost(e) {
 
     setIsSubmittingRejection(true);
     try {
-      const result = await updateStatus(rejectionRequestId, 'ไม่อนุมัติ', rejectionReason.trim());
-      if (result.success) {
-        showToast('ไม่อนุมัติสิทธิ์คำร้องและส่งเหตุผลสำเร็จ', 'success');
-        setRequests(prev => prev.map(req => req.id === rejectionRequestId ? { ...req, status: 'ไม่อนุมัติ', rejectionReason: rejectionReason.trim() } : req));
-        setRejectionRequestId(null);
+      if (rejectionCourseCode) {
+        // Course specific rejection
+        const result = await updateCourseStatus(rejectionRequestId, rejectionCourseCode, 'ไม่อนุมัติ', rejectionReason.trim());
+        if (result.success) {
+          showToast(`ไม่อนุมัติสิทธิ์รายวิชา ${rejectionCourseCode} สำเร็จ`, 'success');
+          if (result.data) {
+            setRequests(prev => prev.map(req => req.id === rejectionRequestId ? result.data! : req));
+          } else {
+            setRequests(prev => prev.map(req => {
+              if (req.id === rejectionRequestId) {
+                const updatedCourses = req.courses.map(c => c.courseCode === rejectionCourseCode ? { ...c, status: 'ไม่อนุมัติ', rejectionReason: rejectionReason.trim() } : c);
+                const anyRejected = updatedCourses.some(c => c.status === 'ไม่อนุมัติ');
+                const allReviewed = updatedCourses.every(c => c.status === 'อนุมัติแล้ว' || c.status === 'ไม่อนุมัติ');
+                let newStatus = req.status;
+                if (allReviewed) {
+                  newStatus = anyRejected ? 'ไม่อนุมัติ' : 'อนุมัติแล้ว';
+                }
+                return { ...req, courses: updatedCourses, status: newStatus };
+              }
+              return req;
+            }));
+          }
+          setRejectionRequestId(null);
+          setRejectionCourseCode(null);
+        } else {
+          showToast(result.error || 'เกิดข้อผิดพลาดในการบันทึกไม่อนุมัติรายวิชา', 'error');
+        }
       } else {
-        showToast(result.error || 'เกิดข้อผิดพลาดในการส่งข้อมูลปฏิเสธ', 'error');
+        // Whole request rejection
+        const result = await updateStatus(rejectionRequestId, 'ไม่อนุมัติ', rejectionReason.trim());
+        if (result.success) {
+          showToast('ไม่อนุมัติสิทธิ์คำร้องและส่งเหตุผลสำเร็จ', 'success');
+          setRequests(prev => prev.map(req => req.id === rejectionRequestId ? { ...req, status: 'ไม่อนุมัติ', rejectionReason: rejectionReason.trim() } : req));
+          setRejectionRequestId(null);
+        } else {
+          showToast(result.error || 'เกิดข้อผิดพลาดในการส่งข้อมูลปฏิเสธ', 'error');
+        }
       }
     } catch (err) {
       showToast('เกิดข้อผิดพลาดในการพิจารณาคำร้อง', 'error');
@@ -566,8 +686,8 @@ function doPost(e) {
         className="w-full max-w-md mx-auto py-12"
         id="admin-login-screen"
       >
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200 p-8 text-center space-y-6 animate-fade-in">
-          <div className="mx-auto w-12 h-12 bg-mangosteen/10 text-mangosteen rounded-full flex items-center justify-center">
+        <div className="bg-white rounded-3xl shadow-lg shadow-slate-200/50 overflow-hidden border border-slate-100 p-8 text-center space-y-6 animate-fade-in">
+          <div className="mx-auto w-12 h-12 bg-mangosteen/10 text-mangosteen rounded-2xl flex items-center justify-center">
             <Lock className="w-5 h-5" />
           </div>
           
@@ -592,7 +712,7 @@ function doPost(e) {
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   placeholder="รหัสเข้าใช้จำลองคือ admin"
-                  className="w-full px-4 py-3 rounded-lg border border-slate-200 text-sm font-sans tracking-widest transition-all focus:outline-hidden focus:border-mangosteen focus:ring-2 focus:ring-mangosteen/10"
+                  className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50 hover:bg-white text-sm font-sans tracking-widest transition-all focus:outline-hidden focus:border-mangosteen focus:ring-4 focus:ring-mangosteen/20"
                   id="admin-password-input"
                 />
                 <button
@@ -609,7 +729,7 @@ function doPost(e) {
             <button
               type="submit"
               disabled={isLoggingIn}
-              className="w-full py-3 bg-mangosteen hover:bg-mangosteen-hover text-white rounded-lg text-sm font-semibold tracking-wide font-sans shadow-md shadow-mangosteen/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="w-full py-3 bg-mangosteen hover:bg-mangosteen-hover text-white rounded-xl text-sm font-bold tracking-wide font-sans shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.98]"
               id="btn-login-submit"
             >
               {isLoggingIn ? (
@@ -617,7 +737,7 @@ function doPost(e) {
               ) : (
                 <Lock className="w-4 h-4" />
               )}
-              ยืนยันการตั้งค่ารหัสผ่าน
+              ยืนยันการเข้าระบบ
             </button>
           </form>
 
@@ -629,86 +749,75 @@ function doPost(e) {
     );
   }
 
-  // LOGGED IN DASHBOARD
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
-      className="w-full space-y-6"
-      id="admin-dashboard-panel"
+      className="space-y-6"
+      id="admin-dashboard-view"
     >
-      {/* Admin Dashboard Control Center */}
-      <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-200 flex flex-col gap-4">
-        {/* Top bar header & log out button */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-mangosteen/5 text-mangosteen rounded-lg">
-              <GraduationCap className="w-5 h-5" />
+      {/* Top dashboard banner & toggle controls */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-1.5 h-6 bg-mangosteen rounded-full"></div>
+              <h1 className="text-lg font-extrabold font-sans text-mangosteen items-center">ระบบบริหารจัดการสำหรับเจ้าหน้าที่</h1>
             </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <div className="w-1 h-5 bg-mangosteen rounded-full"></div>
-                <h2 className="text-lg font-extrabold text-mangosteen font-sans underline decoration-2 underline-offset-8">
-                  ผู้ดูแลระบบสำรองที่นั่ง
-                </h2>
-                <span className="inline-flex items-center text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
-                  <Sparkles className="w-2.5 h-2.5 mr-0.5" />
-                  สิทธิ์เจ้าหน้าที่คณะ
-                </span>
-              </div>
-              <p className="text-slate-400 text-xs font-sans mt-1">
-                พิจารณาและจัดการคำขออนุญาตจัดสรรที่สิทธิ์นักวิชาการ คณะวิทยาศาสตร์และเทคโนโลยี
-              </p>
-            </div>
+            <p className="text-slate-400 text-xs font-sans">
+              พิจารณาคำขอสำรองที่นั่งวิชาเรียนนอกสังกัด คณะวิทยาศาสตร์และเทคโนโลยี • มหาวิทยาลัยฟาฏอนี
+            </p>
           </div>
-
-          <div className="flex items-center gap-2 self-start sm:self-center">
+          
+          <div className="flex items-center gap-2 self-stretch sm:self-auto">
             <button
               onClick={() => setShowGoogleSheetSettings(!showGoogleSheetSettings)}
-              className={`px-4 py-2 text-xs font-bold font-sans rounded-lg flex items-center gap-2 transition-all cursor-pointer border ${
+              className={`flex-1 sm:flex-initial px-4 py-2 text-xs font-bold font-sans rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 border ${
                 showGoogleSheetSettings
-                  ? 'bg-mangosteen text-white border-mangosteen shadow-md'
-                  : 'bg-white text-slate-600 border-slate-200 hover:border-mangosteen hover:text-mangosteen'
+                  ? 'bg-mangosteen text-white border-mangosteen'
+                  : 'bg-white text-slate-700 border-slate-200 hover:border-mangosteen/30 hover:bg-slate-50/50'
               }`}
-              id="btn-toggle-google-sheet-settings"
+              id="btn-toggle-sheet-settings"
             >
-              <Database className="w-3.5 h-3.5" />
-              ตั้งค่า Google Sheet
+              <Settings className="w-4 h-4" />
+              {showGoogleSheetSettings ? 'ปิดตั้งค่า' : 'ตั้งค่า Google Sheet'}
             </button>
-
+            
             <button
               onClick={onLogout}
-              className="px-4 py-2 border border-slate-200 hover:border-rose-200 text-slate-500 hover:text-rose-600 font-sans font-semibold rounded-lg text-xs flex items-center gap-2 transition-colors cursor-pointer"
+              className="px-3.5 py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-500 rounded-lg text-xs font-bold font-sans flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-transparent hover:border-rose-100"
               id="btn-admin-logout"
+              title="ออกจากระบบเจ้าหน้าที่"
             >
               <Power className="w-3.5 h-3.5" />
-              ออกจากระบบ
+              <span className="hidden sm:inline">ออกจากระบบ</span>
             </button>
           </div>
         </div>
 
-        {/* Collapsible Google Sheet Settings Panel */}
         <AnimatePresence>
           {showGoogleSheetSettings && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden border-t border-slate-100 pt-4"
-              id="google-sheet-settings-wrapper"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.25 }}
+              className="overflow-hidden"
+              id="sheet-settings-container"
             >
-              <div className="bg-slate-50 rounded-lg p-5 border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-mangosteen font-bold font-sans text-sm">
-                    <Database className="w-4 h-4 text-mangosteen animate-pulse" />
-                    กำหนดค่าการเชื่อมโยงข้อมูลสู่ Google Sheets คณะฯ
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs">
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/60 font-sans space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-200/50 pb-2.5">
+                  <span className="text-xs font-black text-slate-750 flex items-center gap-1.5 font-sans">
+                    <Database className="w-4 h-4 text-mangosteen" />
+                    เชื่อมโยงฐานข้อมูลแผ่นงานหลัก (Google Sheets Configuration)
+                  </span>
+                  
+                  <div>
                     {isApiConfigured() ? (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-105 text-emerald-800 border border-emerald-200">
-                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5 animate-ping"></span>
-                        เชื่อมต่อจริง (Live Cloud Sheet)
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-850 border border-emerald-200">
+                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5 animate-pulse"></span>
+                        ระบบเชื่อมต่อสเปรดชีตสด (API Live Mode)
                       </span>
                     ) : (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
@@ -730,7 +839,7 @@ function doPost(e) {
                   <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="text"
-                      className="flex-1 px-3 py-2 text-xs font-mono rounded-lg border border-slate-305 focus:outline-hidden focus:border-mangosteen focus:ring-1 focus:ring-mangosteen"
+                      className="flex-1 px-3 py-2 text-xs font-mono rounded-lg border border-slate-350 focus:outline-hidden focus:border-mangosteen focus:ring-1 focus:ring-mangosteen"
                       placeholder="https://script.google.com/macros/s/AKfycb.../exec"
                       value={gasUrlInput}
                       onChange={(e) => setGasUrlInput(e.target.value)}
@@ -931,18 +1040,30 @@ function doPost(e) {
                             courseCode: req.courseCode || '',
                             courseName: req.courseName || '',
                             section: req.section || '',
-                            instructor: req.instructor || ''
+                            instructor: req.instructor || '',
+                            status: req.status,
+                            rejectionReason: req.rejectionReason
                           }]).map((course, cIdx) => (
                             <div key={cIdx} className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-2 transition-all hover:shadow-xs">
-                              <div className="flex items-start gap-1.5 flex-wrap">
-                                {/* Highlights Course Code */}
-                                <span className="bg-mangosteen text-white px-2 py-0.5 rounded-md font-extrabold font-mono text-[10px] leading-none shrink-0 tracking-wide">
-                                  {course.courseCode}
-                                </span>
-                                {/* Highlights Course Name */}
-                                <span className="text-[11px] font-extrabold text-slate-850 leading-tight block">
-                                  {course.courseName}
-                                </span>
+                              <div className="flex items-start justify-between gap-1.5 flex-wrap">
+                                <div className="flex items-start gap-1.5 flex-wrap">
+                                  {/* Highlights Course Code */}
+                                  <span className="bg-mangosteen text-white px-2 py-0.5 rounded-md font-extrabold font-mono text-[10px] leading-none shrink-0 tracking-wide">
+                                    {course.courseCode}
+                                  </span>
+                                  {/* Highlights Course Name */}
+                                  <span className="text-[11px] font-extrabold text-slate-850 leading-tight block">
+                                    {course.courseName}
+                                  </span>
+                                </div>
+                                {/* Status badge per course */}
+                                {course.status && course.status !== 'รอดำเนินการ' && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                                    course.status === 'อนุมัติแล้ว' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                                  }`}>
+                                    {course.status}
+                                  </span>
+                                )}
                               </div>
                               
                               <div className="grid grid-cols-2 gap-2 text-[10px] pt-1 border-t border-slate-105">
@@ -955,6 +1076,49 @@ function doPost(e) {
                                   ผู้สอน: <strong className="text-slate-750 font-bold">{course.instructor || 'ไม่ระบุ'}</strong>
                                 </div>
                               </div>
+
+                              {/* Action Buttons Per Course */}
+                              <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-slate-100">
+                                {(!course.status || course.status === 'รอดำเนินการ') ? (
+                                  <div className="flex w-full items-center gap-2">
+                                    <button
+                                      onClick={() => handleApproveCourse(req.id, course.courseCode)}
+                                      className="flex-1 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                                    >
+                                      <CheckCircle className="w-3 h-3" /> อนุมัติ
+                                    </button>
+                                    <button
+                                      onClick={() => handleRejectCourseModalOpen(req.id, course.courseCode)}
+                                      className="flex-1 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                                    >
+                                      <XCircle className="w-3 h-3" /> ไม่อนุมัติ
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex w-full items-center justify-between">
+                                    <span className={`text-[10px] px-2 py-1 rounded-md font-bold inline-flex items-center gap-1 ${
+                                      course.status === 'อนุมัติแล้ว' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                                    }`}>
+                                      {course.status === 'อนุมัติแล้ว' ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                                      {course.status}
+                                    </span>
+                                    <button
+                                      onClick={() => handleResetCourseToPending(req.id, course.courseCode)}
+                                      className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer border border-transparent hover:border-slate-200"
+                                      title="แก้ไขสถานะกลับเป็น รอดำเนินการ"
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              
+                              {/* Rejection Reason Per Course */}
+                              {course.status === 'ไม่อนุมัติ' && course.rejectionReason && (
+                                <div className="mt-1 text-[10px] text-rose-600 bg-rose-50 p-1.5 rounded-md border border-rose-100">
+                                  <strong>เหตุผล:</strong> {course.rejectionReason}
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1024,23 +1188,8 @@ function doPost(e) {
                       <td className="py-4 px-4 font-sans text-center border-b border-slate-150">
                         <div className="flex flex-col gap-1.5 items-center justify-center" id={`action-panel-desktop-${req.id}`}>
                           {req.status === 'รอดำเนินการ' ? (
-                            <div className="flex flex-col gap-1 w-full max-w-28">
-                              <button
-                                onClick={() => handleApprove(req.id)}
-                                className="w-full py-1.5 text-[10px] font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer shadow-xs"
-                                title="อนุมัติคำขอสิทธิ์นี้"
-                              >
-                                <CheckCircle className="w-3 h-3" />
-                                อนุมัติสิทธิ์
-                              </button>
-                              <button
-                                onClick={() => handleOpenRejectModal(req.id)}
-                                className="w-full py-1.5 text-[10px] font-extrabold text-white bg-rose-600 hover:bg-rose-700 active:scale-95 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                title="ปฏิเสธสิทธิ์ & พิมพ์สาเหตุ"
-                              >
-                                <XCircle className="w-3 h-3" />
-                                ไม่อนุมัติ
-                              </button>
+                            <div className="text-[10px] text-slate-500 italic">
+                              เลือกพิจารณา<br/>เป็นรายวิชา
                             </div>
                           ) : (
                             <button
@@ -1130,21 +1279,74 @@ function doPost(e) {
                       courseCode: req.courseCode || '',
                       courseName: req.courseName || '',
                       section: req.section || '',
-                      instructor: req.instructor || ''
+                      instructor: req.instructor || '',
+                      status: req.status,
+                      rejectionReason: req.rejectionReason
                     }]).map((course, cIdx) => (
                       <div key={cIdx} className="bg-white p-3.5 rounded-xl space-y-2 border border-slate-200 shadow-3xs">
-                        <div className="flex items-start gap-1.5 flex-wrap">
-                          <span className="bg-mangosteen text-white font-extrabold font-mono text-[9px] px-2 py-0.5 rounded leading-none shrink-0">
-                            {course.courseCode}
-                          </span>
-                          <span className="text-xs font-bold text-slate-755 font-sans leading-tight block">
-                            {course.courseName}
-                          </span>
+                        <div className="flex items-start justify-between gap-1.5 flex-wrap">
+                          <div className="flex items-start gap-1.5 flex-wrap">
+                            <span className="bg-mangosteen text-white font-extrabold font-mono text-[9px] px-2 py-0.5 rounded leading-none shrink-0">
+                              {course.courseCode}
+                            </span>
+                            <span className="text-xs font-bold text-slate-755 font-sans leading-tight block">
+                              {course.courseName}
+                            </span>
+                          </div>
+                          {course.status && course.status !== 'รอดำเนินการ' && (
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold ${
+                              course.status === 'อนุมัติแล้ว' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                            }`}>
+                              {course.status}
+                            </span>
+                          )}
                         </div>
                         <div className="grid grid-cols-2 gap-2 text-[10px] pt-1.5 border-t border-slate-100 font-sans">
                           <div>กลุ่ม (Sec): <strong className="text-mangosteen font-extrabold font-mono leading-none">{course.section || '-'}</strong></div>
                           <div className="truncate" title={course.instructor}>ผู้สอน: <strong className="text-slate-700 font-bold">{course.instructor || 'ไม่ระบุ'}</strong></div>
                         </div>
+                        
+                        {/* Action Buttons Per Course (Mobile) */}
+                        <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-slate-100">
+                          {(!course.status || course.status === 'รอดำเนินการ') ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleApproveCourse(req.id, course.courseCode)}
+                                className="flex-1 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                              >
+                                <CheckCircle className="w-3 h-3" /> อนุมัติ
+                              </button>
+                              <button
+                                onClick={() => handleRejectCourseModalOpen(req.id, course.courseCode)}
+                                className="flex-1 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                              >
+                                <XCircle className="w-3 h-3" /> ไม่อนุมัติ
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex w-full items-center justify-between">
+                              <span className={`text-[10px] px-2 py-1 rounded-md font-bold inline-flex items-center gap-1 ${
+                                course.status === 'อนุมัติแล้ว' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                              }`}>
+                                {course.status === 'อนุมัติแล้ว' ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                                {course.status}
+                              </span>
+                              <button
+                                onClick={() => handleResetCourseToPending(req.id, course.courseCode)}
+                                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer border border-transparent hover:border-slate-200"
+                                title="แก้ไขสถานะกลับเป็น รอดำเนินการ"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {course.status === 'ไม่อนุมัติ' && course.rejectionReason && (
+                          <div className="mt-1 text-[9px] text-rose-600 bg-rose-50 p-1.5 rounded-md border border-rose-100">
+                            <strong>เหตุผล:</strong> {course.rejectionReason}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1194,21 +1396,8 @@ function doPost(e) {
                 {/* Mobile action button bottom drawer */}
                 <div className="border-t border-slate-100 pt-3 flex flex-col gap-2" id={`action-panel-mobile-${req.id}`}>
                   {req.status === 'รอดำเนินการ' ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => handleApprove(req.id)}
-                        className="py-2 bg-emerald-650 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1 px-3 transition-all cursor-pointer shadow-2xs"
-                      >
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        อนุมัติสิทธิ์
-                      </button>
-                      <button
-                        onClick={() => handleOpenRejectModal(req.id)}
-                        className="py-2 bg-rose-650 hover:bg-rose-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1 px-3 transition-all cursor-pointer shadow-2xs"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                        ไม่อนุมัติสิทธิ์
-                      </button>
+                    <div className="text-xs text-slate-500 italic text-center py-1">
+                      กรุณาเลือกพิจารณาเป็นรายวิชา
                     </div>
                   ) : (
                     <button

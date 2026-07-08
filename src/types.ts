@@ -10,6 +10,9 @@ export interface CourseInput {
   courseName: string;
   section: string;
   instructor: string;
+  status?: RequestStatus;
+  rejectionReason?: string;
+  processedAt?: string;
 }
 
 export interface ReservationRequest {
@@ -36,6 +39,7 @@ export interface ReservationRequest {
   status: RequestStatus;
   rejectionReason?: string;
   createdAt: string; // ISO or formatted date
+  processedAt?: string; // ISO date string when final status was set
 }
 
 export const DEPARTMENTS = [

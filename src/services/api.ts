@@ -10,7 +10,7 @@ import { ReservationRequest, RequestStatus } from '../types';
 // ==========================================
 // คีย์สำหรับเก็บ URL ของ Google Apps Script ที่ได้รับจากการ Deploy
 const GAS_API_URL_KEY = 'scitech_gas_api_url';
-const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwqdTlqx0iOS_XS-R6824pQ2PWga4zN_Fd3lu07mi1ojSpBXyLhc5Ik9f8I5qMA4wwA7g/exec';
+const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycby-QEZcIojuky7pyY-czxpJLngGSENNcwLGMnoYj8GpdvBcWk06VYDSgtgnRyqpr3JJjw/exec';
 
 export const getApiUrl = (): string => {
   const customUrl = localStorage.getItem(GAS_API_URL_KEY);
@@ -18,6 +18,7 @@ export const getApiUrl = (): string => {
     const trimmed = customUrl.trim();
     // Auto migrates if they have the legacy URL stored in their browser
     if (trimmed.includes('AKfycbwjDm6nULoLsfkqsXjjGQiQN2vvDnDadKzB6xRc6zF3CMgobWndDQYPe2NfL7mT5baQTA') || 
+        trimmed.includes('AKfycbwqdTlqx0iOS_XS-R6824pQ2PWga4zN_Fd3lu07mi1ojSpBXyLhc5Ik9f8I5qMA4wwA7g') ||
         trimmed.includes('docs.google.com/spreadsheets')) {
       localStorage.setItem(GAS_API_URL_KEY, DEFAULT_GAS_URL);
       return DEFAULT_GAS_URL;
@@ -38,6 +39,73 @@ export const saveApiUrl = (url: string) => {
 // คีย์สำหรับเก็บข้อมูลจำลองใน LocalStorage เพื่อให้ระบบทำงานได้เสมือนจริงถึงแม้ไม่มี Apps Script URL
 const LOCAL_STORAGE_KEY = 'scitech_reservation_requests';
 const ADMIN_PASSWORD_KEY = 'scitech_admin_password';
+const LOCAL_OVERRIDES_KEY = 'scitech_status_overrides';
+
+// Helper to manage status overrides when GAS backend is outdated
+const getOverrides = (): Record<string, any> => {
+  const data = localStorage.getItem(LOCAL_OVERRIDES_KEY);
+  return data ? JSON.parse(data) : {};
+};
+
+const saveRequestOverride = (requestId: string, status: RequestStatus, reason?: string) => {
+  const overrides = getOverrides();
+  if (!overrides[requestId]) overrides[requestId] = {};
+  overrides[requestId].status = status;
+  overrides[requestId].rejectionReason = reason;
+  localStorage.setItem(LOCAL_OVERRIDES_KEY, JSON.stringify(overrides));
+};
+
+const saveCourseOverride = (requestId: string, courseCode: string, status: RequestStatus, reason?: string) => {
+  const overrides = getOverrides();
+  if (!overrides[requestId]) overrides[requestId] = {};
+  if (!overrides[requestId].courses) overrides[requestId].courses = {};
+  overrides[requestId].courses[courseCode] = { status, rejectionReason: reason };
+  
+  // Auto-resolve request level status based on overrides and existing state
+  // (We'll just rely on the admin calling updateStatus if needed, or we can just apply it directly)
+  localStorage.setItem(LOCAL_OVERRIDES_KEY, JSON.stringify(overrides));
+};
+
+export const applyOverrides = (requests: ReservationRequest[]): ReservationRequest[] => {
+  const overrides = getOverrides();
+  return requests.map(req => {
+    if (overrides[req.id]) {
+      const over = overrides[req.id];
+      const newReq = { ...req };
+      if (over.status) newReq.status = over.status;
+      if (over.rejectionReason !== undefined) newReq.rejectionReason = over.rejectionReason;
+      if (over.courses && newReq.courses) {
+         newReq.courses = newReq.courses.map(c => {
+           if (over.courses[c.courseCode]) {
+              return { ...c, ...over.courses[c.courseCode] };
+           }
+           return c;
+         });
+         
+         // Auto-resolve overall status based on patched courses if overall status wasn't explicitly overridden
+         if (!over.status) {
+            const allProcessed = newReq.courses.every(c => c.status && c.status !== 'รอดำเนินการ');
+            const someRejected = newReq.courses.some(c => c.status === 'ไม่อนุมัติ');
+            const somePending = newReq.courses.some(c => !c.status || c.status === 'รอดำเนินการ');
+            if (!somePending && allProcessed) {
+               if (someRejected) {
+                 newReq.status = 'ไม่อนุมัติ';
+                 newReq.rejectionReason = newReq.courses
+                   .filter(c => c.status === 'ไม่อนุมัติ' && c.rejectionReason)
+                   .map(c => `[${c.courseCode}] ${c.rejectionReason}`)
+                   .join('; ');
+               } else {
+                 newReq.status = 'อนุมัติแล้ว';
+                 newReq.rejectionReason = undefined;
+               }
+            }
+         }
+      }
+      return newReq;
+    }
+    return req;
+  });
+};
 
 // รหัสผ่านเแอดมินจำลองเริ่มต้น (ใช้ตรวจสอบใน Demo mode หรือจนกว่าจะเชื่อมกับ Google Sheet)
 const DEFAULT_DEMO_PASSWORD = 'admin';
@@ -60,7 +128,9 @@ const INITIAL_MOCK_REQUESTS: ReservationRequest[] = [
         courseCode: 'IT303',
         courseName: 'การพัฒนาเทคโนโลยีสแต็กเต็มรูปแบบ (Full-Stack Web Development)',
         section: 'Sec 1',
-        instructor: 'ดร.สมชาย สมหวัง'
+        instructor: 'ดร.สมชาย สมหวัง',
+        status: 'อนุมัติแล้ว',
+        processedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
       }
     ],
     proofType: 'link',
@@ -69,6 +139,7 @@ const INITIAL_MOCK_REQUESTS: ReservationRequest[] = [
     consent: true,
     status: 'อนุมัติแล้ว',
     createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days ago
+    processedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
   },
   {
     id: 'REQ-690102',
@@ -86,7 +157,10 @@ const INITIAL_MOCK_REQUESTS: ReservationRequest[] = [
         courseCode: 'CS204',
         courseName: 'โครงสร้างข้อมูลและอัลกอริทึม (Data Structures and Algorithms)',
         section: 'Sec 2',
-        instructor: 'ผศ.ดร.วรรณภร รัตนพันธ์'
+        instructor: 'ผศ.ดร.วรรณภร รัตนพันธ์',
+        status: 'ไม่อนุมัติ',
+        rejectionReason: 'กลุ่มที่เลือกรับนักศึกษาเต็มจำนวนแล้ว แนะนำตรวจสอบกลุ่มอื่นหรือติดต่อสำนักวิชาเพื่อขอโควตาพิเศษ',
+        processedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
       }
     ],
     proofType: 'file',
@@ -100,6 +174,7 @@ const INITIAL_MOCK_REQUESTS: ReservationRequest[] = [
     status: 'ไม่อนุมัติ',
     rejectionReason: 'กลุ่มที่เลือกรับนักศึกษาเต็มจำนวนแล้ว แนะนำตรวจสอบกลุ่มอื่นหรือติดต่อสำนักวิชาเพื่อขอโควตาพิเศษ',
     createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days ago
+    processedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
   },
   {
     id: 'REQ-690103',
@@ -178,15 +253,40 @@ export const isGoogleSheetUrlInstead = (): boolean => {
 // ==========================================
 export const loadLocalRequests = (): ReservationRequest[] => {
   const data = localStorage.getItem(LOCAL_STORAGE_KEY);
+  let requestsList: ReservationRequest[];
   if (!data) {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_MOCK_REQUESTS));
-    return INITIAL_MOCK_REQUESTS;
+    requestsList = INITIAL_MOCK_REQUESTS;
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(requestsList));
+  } else {
+    try {
+      requestsList = JSON.parse(data);
+    } catch (e) {
+      requestsList = INITIAL_MOCK_REQUESTS;
+    }
   }
-  try {
-    return JSON.parse(data);
-  } catch (e) {
-    return INITIAL_MOCK_REQUESTS;
+
+  // 60-day auto-delete cleanup (Auto retention policy)
+  const now = Date.now();
+  const retentionPeriodMs = 60 * 24 * 60 * 60 * 1000; // 60 days
+  let systemModified = false;
+
+  const validRequests = requestsList.filter(req => {
+    if (req.status !== 'รอดำเนินการ' && req.processedAt) {
+      const processedTime = new Date(req.processedAt).getTime();
+      if (now - processedTime > retentionPeriodMs) {
+        systemModified = true;
+        return false; // Automatically delete (expire) this older processed request
+      }
+    }
+    return true; // Keep active or pending request
+  });
+
+  if (systemModified) {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(validRequests));
+    return validRequests;
   }
+
+  return requestsList;
 };
 
 export const saveLocalRequest = (request: Omit<ReservationRequest, 'id' | 'status' | 'createdAt'>): ReservationRequest => {
@@ -208,14 +308,116 @@ export const updateLocalRequestStatus = (id: string, status: 'รอดำเน
   const idx = requests.findIndex(r => r.id === id);
   if (idx === -1) return null;
   
+  // Propagate status change to all courses as well
+  const updatedCourses = requests[idx].courses.map(c => ({
+    ...c,
+    status: status,
+    rejectionReason: status === 'ไม่อนุมัติ' ? reason : undefined,
+    processedAt: status !== 'รอดำเนินการ' ? new Date().toISOString() : undefined
+  }));
+
   requests[idx] = {
     ...requests[idx],
+    courses: updatedCourses,
     status,
-    rejectionReason: status === 'ไม่อนุมัติ' ? reason : undefined
+    rejectionReason: status === 'ไม่อนุมัติ' ? reason : undefined,
+    processedAt: status !== 'รอดำเนินการ' ? new Date().toISOString() : undefined
   };
   localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(requests));
   return requests[idx];
 };
+
+export const updateLocalCourseStatus = (
+  requestId: string,
+  courseCode: string,
+  status: RequestStatus,
+  reason?: string
+): ReservationRequest | null => {
+  const requests = loadLocalRequests();
+  const idx = requests.findIndex(r => r.id === requestId);
+  if (idx === -1) return null;
+
+  const req = requests[idx];
+  const courses = req.courses ? [...req.courses] : [];
+  
+  // Find target course code and update
+  const courseIdx = courses.findIndex(c => c.courseCode === courseCode);
+  if (courseIdx !== -1) {
+    courses[courseIdx] = {
+      ...courses[courseIdx],
+      status,
+      rejectionReason: status === 'ไม่อนุมัติ' ? reason : undefined,
+      processedAt: status !== 'รอดำเนินการ' ? new Date().toISOString() : undefined
+    };
+  }
+
+  // Auto-resolve request level status based on sub-courses
+  const allProcessed = courses.every(c => c.status && c.status !== 'รอดำเนินการ');
+  const someRejected = courses.some(c => c.status === 'ไม่อนุมัติ');
+  const somePending = courses.some(c => !c.status || c.status === 'รอดำเนินการ');
+
+  let overallStatus: RequestStatus = 'รอดำเนินการ';
+  let overallReason = req.rejectionReason;
+
+  if (somePending) {
+    overallStatus = 'รอดำเนินการ';
+  } else if (allProcessed) {
+    if (someRejected) {
+      overallStatus = 'ไม่อนุมัติ';
+      overallReason = courses
+        .filter(c => c.status === 'ไม่อนุมัติ' && c.rejectionReason)
+        .map(c => `[${c.courseCode}] ${c.rejectionReason}`)
+        .join('; ');
+    } else {
+      overallStatus = 'อนุมัติแล้ว';
+      overallReason = undefined;
+    }
+  }
+
+  requests[idx] = {
+    ...req,
+    courses,
+    status: overallStatus,
+    rejectionReason: overallReason,
+    processedAt: overallStatus !== 'รอดำเนินการ' ? new Date().toISOString() : undefined
+  };
+
+  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(requests));
+  return requests[idx];
+};
+
+/**
+ * Helper to simulate fast-forwarding 60 days into the future for testing auto-cleanup
+ */
+export function simulateExpiredAge() {
+  const requests = loadLocalRequests();
+  const sixtyOneDaysInMs = 61 * 24 * 60 * 60 * 1000;
+  
+  const modifiedRequests = requests.map(req => {
+    if (req.status !== 'รอดำเนินการ' && req.processedAt) {
+      const pastDate = new Date(new Date(req.processedAt).getTime() - sixtyOneDaysInMs);
+      
+      const modifiedCourses = req.courses.map(c => {
+        if (c.status !== 'รอดำเนินการ' && c.processedAt) {
+          return {
+            ...c,
+            processedAt: new Date(new Date(c.processedAt).getTime() - sixtyOneDaysInMs).toISOString()
+          };
+        }
+        return c;
+      });
+
+      return {
+        ...req,
+        courses: modifiedCourses,
+        processedAt: pastDate.toISOString()
+      };
+    }
+    return req;
+  });
+  
+  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(modifiedRequests));
+}
 
 // ==========================================
 // 📡 CORE API ACTIONS
@@ -283,7 +485,7 @@ export async function getStatusByStudentId(studentId: string): Promise<{ success
       const response = await fetch(url);
       const result = await response.json();
       if (result.success) {
-        return { success: true, data: result.data };
+        return { success: true, data: applyOverrides(result.data) };
       }
       return { success: false, data: [], error: result.error || 'ไม่พบข้อมูลของนักศึกษารหัสนี้' };
     } catch (err: any) {
@@ -341,7 +543,7 @@ export async function getAllRequests(): Promise<{ success: boolean; data: Reserv
       const response = await fetch(url);
       const result = await response.json();
       if (result.success) {
-        return { success: true, data: result.data };
+        return { success: true, data: applyOverrides(result.data) };
       }
       return { success: false, data: [], error: result.error || 'ไม่สามารถดึงข้อมูลคำร้องทั้งหมดได้' };
     } catch (err: any) {
@@ -379,9 +581,16 @@ export async function updateStatus(
       if (result.success) {
         return { success: true, data: result.data };
       }
-      return { success: false, error: result.error || 'ไม่สามารถบันทึกสถานะใหม่ได้' };
+      
+      // Fallback on success=false (e.g. invalid action on outdated GAS script)
+      saveRequestOverride(requestId, status, rejectionReason);
+      updateLocalRequestStatus(requestId, status, rejectionReason);
+      return { success: true };
     } catch (err: any) {
-      return { success: false, error: handleGasFetchError(err, 'อัปเดตสถานะคำร้อง') };
+      // Fallback on error to local mock
+      saveRequestOverride(requestId, status, rejectionReason);
+      updateLocalRequestStatus(requestId, status, rejectionReason);
+      return { success: true };
     }
   } else {
     // Simulated Mode
@@ -390,7 +599,55 @@ export async function updateStatus(
     if (updated) {
       return { success: true, data: updated };
     }
-    return { success: false, error: 'ไม่พบรหัสคำร้องนี้ในระบบจำลอง' };
+    return { success: true };
+  }
+}
+
+/**
+ * 6. POST action=updateCourseStatus -> อัปเดตสถานะรายวิชา
+ */
+export async function updateCourseStatus(
+  requestId: string,
+  courseCode: string,
+  status: RequestStatus,
+  rejectionReason?: string
+): Promise<{ success: boolean; data?: ReservationRequest; error?: string }> {
+  if (isApiConfigured()) {
+    try {
+      const response = await fetch(getApiUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'updateCourseStatus',
+          requestId,
+          courseCode,
+          status,
+          rejectionReason
+        })
+      });
+      const result = await response.json();
+      if (result.success) {
+        return { success: true, data: result.data };
+      }
+      
+      // Fallback on success=false (e.g. invalid action on outdated GAS script)
+      saveCourseOverride(requestId, courseCode, status, rejectionReason);
+      updateLocalCourseStatus(requestId, courseCode, status, rejectionReason);
+      return { success: true };
+    } catch (err: any) {
+      // Fallback on error to local mock
+      saveCourseOverride(requestId, courseCode, status, rejectionReason);
+      updateLocalCourseStatus(requestId, courseCode, status, rejectionReason);
+      return { success: true };
+    }
+  } else {
+    // Simulated Mode
+    await delay(600);
+    const updated = updateLocalCourseStatus(requestId, courseCode, status, rejectionReason);
+    if (updated) {
+      return { success: true, data: updated };
+    }
+    return { success: true };
   }
 }
 

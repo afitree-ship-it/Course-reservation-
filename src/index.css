@@ -26,3 +26,12 @@
   background: #7A1F2B;
 }
 
+.dark-theme {
+  filter: invert(1) hue-rotate(180deg);
+  background-color: #f8fafc; /* Inverts to a very dark background #070503 */
+}
+.dark-theme img, 
+.dark-theme video, 
+.dark-theme iframe {
+  filter: invert(1) hue-rotate(180deg);
+}
