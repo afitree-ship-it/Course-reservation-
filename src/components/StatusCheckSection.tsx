@@ -31,7 +31,20 @@ interface StatusCheckSectionProps {
   showToast: (msg: string, type: 'success' | 'error' | 'warning' | 'info') => void;
 }
 
+
+import { useTranslation } from '../contexts/LanguageContext';
+
 export default function StatusCheckSection({ initialStudentId = '', showToast }: StatusCheckSectionProps) {
+  const { t, isTh } = useTranslation();
+
+  const getTabLabel = (tab: string) => {
+    if (tab === 'ทั้งหมด') return isTh ? 'ทั้งหมด' : 'All';
+    if (tab === 'รอดำเนินการ') return isTh ? 'รอดำเนินการ' : 'Pending';
+    if (tab === 'อนุมัติแล้ว') return isTh ? 'อนุมัติแล้ว' : 'Approved';
+    if (tab === 'ไม่อนุมัติ') return isTh ? 'ไม่อนุมัติ' : 'Rejected';
+    return tab;
+  };
+
   const [studentId, setStudentId] = useState(initialStudentId);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -118,42 +131,52 @@ export default function StatusCheckSection({ initialStudentId = '', showToast }:
     performSearch(studentId);
   };
 
+  
   const formatDate = (isoString: string) => {
     try {
       const d = new Date(isoString);
-      return d.toLocaleDateString('th-TH', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      }) + ' น.';
+      if (isTh) {
+        return d.toLocaleDateString('th-TH', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }) + ' น.';
+      } else {
+        return d.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+      }
     } catch (e) {
       return isoString;
     }
   };
-
-  const getStatusBadge = (status: RequestStatus) => {
+const getStatusBadge = (status: RequestStatus) => {
     switch (status) {
       case 'รอดำเนินการ':
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
             <Clock className="w-3.5 h-3.5 animate-pulse" />
-            รอดำเนินการ
+            {isTh ? "รอดำเนินการ" : "Pending"}
           </span>
         );
       case 'อนุมัติแล้ว':
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 animate-fade-in">
             <CheckCircle className="w-3.5 h-3.5" />
-            อนุมัติแล้ว
+            {isTh ? "อนุมัติแล้ว" : "Approved"}
           </span>
         );
       case 'ไม่อนุมัติ':
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
             <XCircle className="w-3.5 h-3.5" />
-            ไม่อนุมัติ
+            {isTh ? "ไม่อนุมัติ" : "Rejected"}
           </span>
         );
     }
@@ -174,11 +197,11 @@ export default function StatusCheckSection({ initialStudentId = '', showToast }:
           <div className="flex items-center space-x-2.5 mb-2">
             <div className="w-1.5 h-6 bg-mangosteen rounded-full"></div>
             <h2 className="text-xl font-extrabold tracking-tight text-mangosteen font-sans underline decoration-2 underline-offset-8">
-              ตรวจสอบสถานะคำร้อง
+              {t('statusTitle')}
             </h2>
           </div>
           <p className="text-slate-500 text-xs font-sans">
-            กรอกรหัสนักศึกษา 9 หลักของคุณด้านล่าง เพื่อเรียกดูประวัติและติดตามผลการจัดสิทธิ์จากเจ้าหน้าที่โดยตรง
+            {t('statusDesc')}
           </p>
         </div>
 
@@ -191,7 +214,7 @@ export default function StatusCheckSection({ initialStudentId = '', showToast }:
               type="text"
               pattern="\d*"
               maxLength={9}
-              placeholder="รหัสนักศึกษา 9 หลัก (เช่น 650109121)"
+              placeholder={t("statusInputPlaceholder")}
               value={studentId}
               onChange={(e) => setStudentId(e.target.value.replace(/\D/g, ''))}
               className="w-full pl-10 pr-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50 hover:bg-white text-sm font-sans tracking-wide transition-all focus:outline-hidden focus:border-mangosteen focus:ring-4 focus:ring-mangosteen/20"
@@ -209,7 +232,7 @@ export default function StatusCheckSection({ initialStudentId = '', showToast }:
             ) : (
               <Search className="w-4 h-4" />
             )}
-            ค้นหาคำร้อง
+            {t('statusSearchButton')}
           </button>
         </form>
       </div>
@@ -251,10 +274,10 @@ export default function StatusCheckSection({ initialStudentId = '', showToast }:
                       <div className="space-y-0.5">
                         <h4 className="text-sm font-extrabold text-slate-800 font-sans flex items-center gap-1.5">
                           <Calendar className="w-4 h-4 text-mangosteen animate-pulse" />
-                          ปีที่ยื่นคำร้อง (พ.ศ.)
+                          {isTh ? 'ปีที่ยื่นคำร้อง (พ.ศ.)' : 'Submission Year (C.E.)'}
                         </h4>
                         <p className="text-xs text-slate-400 font-sans">
-                          เลือกเพื่อตรวจสอบข้อมูลย้อนหลังแยกตามรายปี พ.ศ. ของข้อมูลคำร้อง
+                          {isTh ? 'เลือกเพื่อตรวจสอบข้อมูลย้อนหลังแยกตามรายปี พ.ศ. ของข้อมูลคำร้อง' : 'Select a year to review historical request data'}
                         </p>
                       </div>
                       
@@ -277,15 +300,15 @@ export default function StatusCheckSection({ initialStudentId = '', showToast }:
                                 setSelectedYear(yr);
                                 setStatusFilter('ทั้งหมด');
                               }}
-                              className={`px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold font-sans transition-all cursor-pointer flex items-center gap-1.5 border ${
-                                isActive
-                                  ? 'bg-mangosteen text-white border-mangosteen shadow-sm'
-                                  : 'bg-white text-slate-650 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                              className={`px-3 py-1.5 text-xs font-sans font-bold rounded-lg border transition-all cursor-pointer ${
+                                isActive 
+                                  ? 'bg-mangosteen text-white border-mangosteen shadow-xs ring-2 ring-mangosteen/20' 
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
                               }`}
                             >
-                              <span>พ.ศ. {yr}</span>
-                              <span className={`px-1.5 py-0.5 text-[10px] rounded-full font-mono font-bold ${
-                                isActive ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
+                              <span>{isTh ? yr : yr - 543}</span>
+                              <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${
+                                isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
                               }`}>
                                 {yrCount}
                               </span>
@@ -310,15 +333,13 @@ export default function StatusCheckSection({ initialStudentId = '', showToast }:
                             onClick={() => setStatusFilter(tab)}
                             className={`flex-1 min-w-[70px] sm:min-w-[90px] text-xs py-2 px-2.5 sm:px-3 text-center rounded-xl font-sans font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                               isActive 
-                                ? 'bg-white text-mangosteen shadow-sm border border-slate-200/50' 
+                                ? 'bg-white text-mangosteen shadow-xs border border-slate-200/50 font-extrabold' 
                                 : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
                             }`}
                           >
-                            <span>{tab}</span>
-                            <span className={`px-1.5 py-0.5 text-[10px] rounded-full font-mono ${
-                              isActive 
-                                ? 'bg-mangosteen/10 text-mangosteen' 
-                                : 'bg-slate-200 text-slate-600'
+                            <span>{getTabLabel(tab)}</span>
+                            <span className={`px-1.5 py-0.5 text-[10px] rounded-full font-bold ${
+                              isActive ? 'bg-mangosteen/10 text-mangosteen' : 'bg-slate-200 text-slate-500'
                             }`}>
                               {count}
                             </span>
@@ -327,269 +348,142 @@ export default function StatusCheckSection({ initialStudentId = '', showToast }:
                       })}
                     </div>
 
-                    <div className="flex justify-between items-center px-1 text-xs font-semibold text-slate-400 font-sans">
-                      <span>
-                        แสดง {resultsForYear.filter(r => statusFilter === 'ทั้งหมด' ? true : r.status === statusFilter).length} จาก {resultsForYear.length} รายการคำร้อง ของปี พ.ศ. {selectedYear}
-                      </span>
-                      <span className="text-[10px] text-slate-400/90 font-medium">
-                        *จัดเรียงจากรายการล่าสุดที่ยื่นเข้ามาก่อน
-                      </span>
-                    </div>
+                    {/* Results Cards List */}
+                    <div className="space-y-4">
+                      {resultsForYear
+                        .filter(request => statusFilter === 'ทั้งหมด' ? true : request.status === statusFilter)
+                        .map((request, idx) => {
+                          const isNewestGlobal = results[0]?.id === request.id;
+                          const coursesArray = (request.courses && request.courses.length > 0) ? request.courses : [{
+                            courseCode: request.courseCode || '',
+                            courseName: request.courseName || '',
+                            section: request.section || '',
+                            instructor: request.instructor || '',
+                            status: request.status || 'รอดำเนินการ',
+                            rejectionReason: request.rejectionReason
+                          }];
 
-                    {resultsForYear
-                      .filter(request => statusFilter === 'ทั้งหมด' ? true : request.status === statusFilter)
-                      .map((request, idx) => {
-                        const isNewestGlobal = results[0]?.id === request.id;
-                        const isExpanded = expandedId === request.id;
-                        
-                        const coursesArray = (request.courses && request.courses.length > 0) ? request.courses : [{
-                          courseCode: request.courseCode || '',
-                          courseName: request.courseName || '',
-                          section: request.section || '',
-                          instructor: request.instructor || ''
-                        }];
-                        const primaryCourse = coursesArray[0];
-
-                        return (
-                          <motion.div
-                            key={request.id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: idx * 0.05 }}
-                            className={`bg-white rounded-xl sm:rounded-2xl shadow-xs border transition-all relative overflow-hidden ${
-                              isExpanded 
-                                ? 'border-mangosteen/30 shadow-sm ring-1 ring-mangosteen/5' 
-                                : 'border-slate-200 hover:border-slate-350 hover:shadow-xs'
-                            }`}
-                            id={`request-status-card-${request.id}`}
-                          >
-                            {/* Status bar top */}
-                            <div className={`absolute top-0 left-0 right-0 h-1.5 ${
-                              request.status === 'รอดำเนินการ' 
-                                ? 'bg-amber-400' 
-                                : request.status === 'อนุมัติแล้ว' 
-                                  ? 'bg-emerald-500' 
-                                  : 'bg-rose-500'
-                            }`}></div>
-
-                            {/* Clickable Header for Collapsible Accordion */}
-                            <div 
-                              onClick={() => setExpandedId(isExpanded ? null : request.id)}
-                              className="p-4 sm:p-5 cursor-pointer hover:bg-slate-50/40 select-none transition-colors"
+                          return (
+                            <motion.div
+                              key={request.id}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: idx * 0.05 }}
+                              className="bg-white rounded-2xl shadow-xs border border-slate-200 hover:border-mangosteen/30 hover:shadow-md transition-all p-5 space-y-4 relative overflow-hidden"
+                              id={`request-status-card-${request.id}`}
                             >
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="space-y-1.5 flex-1 min-w-0">
+                              {/* Left status colored accent strip */}
+                              <div className={`absolute top-0 bottom-0 left-0 w-1.5 ${
+                                request.status === 'รอดำเนินการ' 
+                                  ? 'bg-amber-400' 
+                                  : request.status === 'อนุมัติแล้ว' 
+                                    ? 'bg-emerald-500' 
+                                    : 'bg-rose-500'
+                              }`}></div>
+
+                              {/* Student Name Header and Submission date */}
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 pl-2">
+                                <div className="space-y-1">
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold text-slate-500 bg-slate-100 font-mono">
-                                      ID: {request.id}
+                                    <span className="text-base font-extrabold text-slate-800 font-sans flex items-center gap-2">
+                                      <User className="w-4.5 h-4.5 text-mangosteen" />
+                                      {request.fullName}
                                     </span>
-
-                                    {/* Highlight Badge if it's the absolute latest submission */}
                                     {isNewestGlobal && (
-                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-extrabold text-amber-800 bg-amber-100 border border-amber-200/50 shadow-3xs">
-                                        <Sparkles className="w-3 h-3 text-amber-600 animate-spin-slow" />
-                                        ยื่นคำร้องล่าสุด
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold text-amber-800 bg-amber-100 border border-amber-200/50">
+                                        {isTh ? 'ล่าสุด' : 'Latest'}
                                       </span>
                                     )}
                                   </div>
-
-                                  <h4 className="text-sm sm:text-base font-extrabold text-slate-800 font-sans truncate pr-2">
-                                    {coursesArray.length > 1 
-                                      ? `ยื่นคำร้องร่วมกันทั้งหมด ${coursesArray.length} รายวิชา` 
-                                      : `${primaryCourse.courseCode} • ${primaryCourse.courseName}`}
-                                  </h4>
-
-                                  <div className="flex items-center gap-2 text-xs text-slate-400 font-sans">
-                                    <span>ยื่นเมื่อ {formatDate(request.createdAt)}</span>
-                                    <span>•</span>
-                                    <span>กลุ่ม {primaryCourse.section}</span>
+                                  <div className="flex items-center gap-1 text-xs text-slate-400 font-sans">
+                                    <Clock className="w-3.5 h-3.5 text-slate-350" />
+                                    <span>{isTh ? 'ยื่นเมื่อ' : 'Submitted:'} {formatDate(request.createdAt)}</span>
                                   </div>
                                 </div>
-
-                                {/* Right Side Actions: Status Badge & Chevron */}
-                                <div className="flex items-center gap-3 shrink-0">
-                                  <div className="hidden xs:block">
-                                    {getStatusBadge(request.status)}
-                                  </div>
-                                  <div className="w-7 h-7 bg-slate-100 hover:bg-slate-200/80 rounded-full flex items-center justify-center text-slate-500 transition-colors">
-                                    {isExpanded ? (
-                                      <ChevronUp className="w-4 h-4" />
-                                    ) : (
-                                      <ChevronDown className="w-4 h-4" />
-                                    )}
-                                  </div>
+                                <div className="shrink-0">
+                                  {getStatusBadge(request.status)}
                                 </div>
                               </div>
 
-                              {/* Show status badge on small screen lines if hidden */}
-                              <div className="block xs:hidden mt-2 pt-2 border-t border-slate-100/60">
-                                {getStatusBadge(request.status)}
-                              </div>
+                              {/* Course Cards / Main Details */}
+                              <div className="space-y-3 pl-2">
+                                {coursesArray.map((course, cIdx) => {
+                                  const courseStatus = course.status || request.status || 'รอดำเนินการ';
+                                  return (
+                                    <div 
+                                      key={cIdx}
+                                      className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/60 space-y-2.5 transition-all"
+                                    >
+                                      {/* Course code & Name with Course Status */}
+                                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-xs font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-white">
+                                            {course.courseCode}
+                                          </span>
+                                          <span className="text-sm font-extrabold text-slate-800">
+                                            {course.courseName}
+                                          </span>
+                                        </div>
 
-                              {/* 📌 แสดงรายวิชาและสถานะการพิจารณา โดยให้สถานะอยู่หลังแต่ละวิชาเลยเพื่อดูง่ายและไม่สับสน */}
-                              <div className="mt-3 pt-2.5 border-t border-slate-100/70 flex flex-col gap-1.5">
-                                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
-                                  <BookOpen className="w-3.5 h-3.5 text-slate-400" />
-                                  รายวิชาที่ยื่นและสถานะพิจารณา:
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                  {coursesArray.map((c, cIdx) => {
-                                    const cStatus = c.status || 'รอดำเนินการ';
-                                    let statusStyle = 'bg-amber-50 text-amber-700 border-amber-200';
-                                    if (cStatus === 'อนุมัติแล้ว') statusStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                                    if (cStatus === 'ไม่อนุมัติ') statusStyle = 'bg-rose-50 text-rose-700 border-rose-200';
-
-                                    return (
-                                      <div key={cIdx} className="inline-flex items-center gap-1.5 text-xs font-sans bg-slate-50 hover:bg-slate-100/80 px-2.5 py-1 rounded-lg border border-slate-200 transition-colors">
-                                        <span className="font-extrabold text-slate-700">{c.courseCode}</span>
-                                        <span className="text-slate-300">|</span>
-                                        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold border ${statusStyle}`}>
-                                          {cStatus === 'อนุมัติแล้ว' && '✅ อนุมัติ'}
-                                          {cStatus === 'ไม่อนุมัติ' && '❌ ไม่อนุมัติ'}
-                                          {cStatus === 'รอดำเนินการ' && '⏳ รอพิจารณา'}
-                                        </span>
+                                        <div className="shrink-0">
+                                          {courseStatus === 'อนุมัติแล้ว' ? (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 leading-none shadow-3xs">{isTh ? "อนุมัติแล้ว" : "Approved"}</span>
+                                          ) : courseStatus === 'ไม่อนุมัติ' ? (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 leading-none shadow-3xs">{isTh ? "ไม่อนุมัติ" : "Rejected"}</span>
+                                          ) : (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-50/50 text-amber-700 border border-amber-250 leading-none shadow-3xs">{isTh ? "รอดำเนินการ" : "Pending"}</span>
+                                          )}
+                                        </div>
                                       </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </div>
 
-                            {/* Detailed Content shown only when Expanded */}
-                            {isExpanded && (
-                              <div className="px-4 pb-5 sm:px-6 sm:pb-6 border-t border-slate-100 pt-5 space-y-4 animate-fade-in bg-slate-50/30">
-                                
-                                {/* 📢 แสดงสถานะข้อมูลอนุมัติ/ไม่อนุมัติอย่างชัดเจน */}
-                                <div className={`p-4 rounded-xl border font-sans ${
-                                  request.status === 'อนุมัติแล้ว'
-                                    ? 'bg-emerald-50/70 border-emerald-100 text-emerald-900'
-                                    : request.status === 'ไม่อนุมัติ'
-                                      ? 'bg-rose-50/70 border-rose-100 text-rose-900'
-                                      : 'bg-amber-50/70 border-amber-100 text-amber-900'
-                                }`}>
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                    <div className="flex items-start sm:items-center gap-3">
-                                      {request.status === 'อนุมัติแล้ว' ? (
-                                        <CheckCircle className="w-8 h-8 text-emerald-500 shrink-0" />
-                                      ) : request.status === 'ไม่อนุมัติ' ? (
-                                        <XCircle className="w-8 h-8 text-rose-500 shrink-0" />
-                                      ) : (
-                                        <Clock className="w-8 h-8 text-amber-500 animate-pulse shrink-0" />
-                                      )}
-                                      <div>
-                                        <span className="text-xs text-slate-500 font-medium block mb-0.5">
-                                          สถานะคำร้อง (ภาพรวม):
-                                        </span>
-                                        <span className={`text-lg font-black leading-tight ${
-                                          request.status === 'อนุมัติแล้ว'
-                                            ? 'text-emerald-700'
-                                            : request.status === 'ไม่อนุมัติ'
-                                              ? 'text-rose-700'
-                                              : 'text-amber-700'
-                                        }`}>
-                                          {request.status === 'อนุมัติแล้ว' && 'อนุมัติสิทธิ์เรียบร้อยแล้ว'}
-                                          {request.status === 'ไม่อนุมัติ' && 'ไม่ผ่านการอนุมัติ'}
-                                          {request.status === 'รอดำเนินการ' && 'กำลังรอเจ้าหน้าที่พิจารณา'}
-                                        </span>
+                                      {/* Section & Instructor details */}
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-xs text-slate-500 font-sans border-t border-slate-200/40">
+                                        <div>
+                                          {isTh ? 'กลุ่มเรียน (Section):' : 'Section:'} <span className="font-extrabold text-mangosteen font-mono text-sm">{course.section}</span>
+                                        </div>
+                                        <div>
+                                          {isTh ? 'อาจารย์ผู้สอน:' : 'Instructor:'} <span className="font-semibold text-slate-700">{course.instructor || (isTh ? 'ไม่ระบุ' : 'N/A')}</span>
+                                        </div>
                                       </div>
-                                    </div>
-                                  </div>
 
-                                  {/* 🚨 แสดงเฉพาะหมายเหตุที่ไม่อนุมัติอย่างชัดเจนสะดุดตา */}
-                                  {request.status === 'ไม่อนุมัติ' && request.rejectionReason && (
-                                    <div className="mt-3 pt-3 border-t border-rose-200/60">
-                                      <span className="font-extrabold text-xs text-rose-800 block mb-1">
-                                        หมายเหตุ:
-                                      </span>
-                                      <div className="text-xs text-rose-950 font-semibold bg-white/80 px-3 py-2 rounded-lg border border-rose-100 whitespace-pre-wrap shadow-3xs">
-                                        {request.rejectionReason}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* สำหรับกรณีอนุมัติแล้วแต่แอดมินเขียนโน้ตเพิ่มเติมก็ให้แสดงเป็นบันทึกอื่น */}
-                                  {request.status !== 'ไม่อนุมัติ' && request.rejectionReason && (
-                                    <div className="mt-3 pt-3 border-t border-slate-200/60">
-                                      <span className="font-bold text-xs text-slate-600 block mb-1">
-                                        บันทึกเพิ่มเติมจากเจ้าหน้าที่:
-                                      </span>
-                                      <div className="text-xs text-slate-800 font-medium bg-white/70 px-3 py-2 rounded-lg border border-slate-100 whitespace-pre-wrap">
-                                        {request.rejectionReason}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* 📚 ข้อมูลวิชาเรียนที่ยื่นคำร้องสำรองที่นั่งทั้งหมด */}
-                                <div className="space-y-2.5 font-sans">
-                                  <div className="text-xs font-bold text-slate-500 tracking-wide uppercase flex items-center gap-1.5">
-                                    <BookOpen className="w-4 h-4 text-mangosteen animate-pulse" />
-                                    ผลการอนุมัติรายวิชาเรียน ({coursesArray.length} รายการเรียน)
-                                  </div>
-
-                                  <div className="grid grid-cols-1 gap-2.5 bg-slate-50/50 p-2 sm:p-3 rounded-xl border border-slate-200">
-                                    {coursesArray.map((course, cIdx) => {
-                                      const courseStatus = course.status || 'รอดำเนินการ';
-                                      return (
-                                        <div 
-                                          key={cIdx} 
-                                          className={`bg-white rounded-lg p-3.5 border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-3xs ${
-                                            courseStatus === 'อนุมัติแล้ว' 
-                                              ? 'border-emerald-250 bg-emerald-50/10' 
-                                              : courseStatus === 'ไม่อนุมัติ' 
-                                                ? 'border-rose-250 bg-rose-50/10' 
-                                                : 'border-slate-200'
-                                          }`}
-                                        >
-                                          <div className="space-y-1.5 flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                              <span className="text-[10px] font-extrabold text-white bg-slate-800 px-2 py-0.5 rounded font-mono tracking-wide">
-                                                {course.courseCode}
-                                              </span>
-                                              <span className="text-sm font-extrabold text-slate-800 leading-tight">
-                                                {course.courseName}
-                                              </span>
-                                              
-                                              {/* 📍 สถานะการดำเนินการรายวิชา (อยู่หลังรายวิชาเรียนเพื่อดูง่าย ทันที ไม่สับสน) */}
-                                              <span className="inline-flex items-center">
-                                                {courseStatus === 'อนุมัติแล้ว' ? (
-                                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 leading-none">
-                                                    ✅ อนุมัติสิทธิ์แล้ว
-                                                  </span>
-                                                ) : courseStatus === 'ไม่อนุมัติ' ? (
-                                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold bg-rose-100 text-rose-805 border border-rose-200 leading-none">
-                                                    ❌ ไม่อนุมัติ
-                                                  </span>
-                                                ) : (
-                                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-750 border border-amber-200 leading-none">
-                                                    ⏳ รอดำเนินการพิจารณา
-                                                  </span>
-                                                )}
-                                              </span>
-                                            </div>
-                                            <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-x-4">
-                                              <div>อาจารย์ผู้สอน: <span className="font-semibold text-slate-700">{course.instructor || 'ไม่ระบุ'}</span></div>
-                                              <div className="hidden sm:block text-slate-350">|</div>
-                                              <div>กลุ่มเรียน: <span className="font-black text-mangosteen font-mono text-xs">{course.section}</span></div>
-                                            </div>
-
-                                            {/* Extra individual course rejection reason */}
-                                            {courseStatus === 'ไม่อนุมัติ' && course.rejectionReason && (
-                                              <div className="text-[11px] font-medium text-rose-800 bg-rose-50 border border-rose-100 p-2 rounded-md mt-1.5">
-                                                ⚠️ แนะนำคุณ: {course.rejectionReason}
-                                              </div>
-                                            )}
+                                      {/* Course level notes */}
+                                      {courseStatus === 'ไม่อนุมัติ' && course.rejectionReason && (
+                                        <div className="text-xs font-medium text-rose-800 bg-rose-50/50 border border-rose-100 p-2 rounded-lg flex gap-1.5 items-start">
+                                          <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                                          <div>
+                                            <span className="font-bold">{isTh ? 'หมายเหตุ:' : 'Remark:'}</span> {course.rejectionReason}
                                           </div>
                                         </div>
-                                      );
-                                    })}
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Overall rejection reason if entire request was rejected */}
+                              {request.status === 'ไม่อนุมัติ' && request.rejectionReason && (
+                                <div className="text-xs font-medium text-rose-800 bg-rose-50/50 border border-rose-200/50 p-3 rounded-xl flex gap-2 items-start ml-2">
+                                  <AlertCircle className="w-4.5 h-4.5 text-rose-500 shrink-0 mt-0.5" />
+                                  <div>
+                                    <span className="font-bold block mb-0.5 text-rose-900 text-xs">{isTh ? 'หมายเหตุจากเจ้าหน้าที่ (ภาพรวม):' : 'Officer Rejection Comment (Overall):'}</span>
+                                    <div className="text-rose-950 font-semibold">{request.rejectionReason}</div>
                                   </div>
                                 </div>
-                              </div>
-                            )}
-                          </motion.div>
-                        );
-                      })}
+                              )}
+
+                              {/* Overall additional notes if request is pending or approved but has extra feedback */}
+                              {request.status !== 'ไม่อนุมัติ' && request.rejectionReason && (
+                                <div className="text-xs font-medium text-slate-700 bg-slate-50/80 border border-slate-200/50 p-3 rounded-xl flex gap-2 items-start ml-2">
+                                  <AlertCircle className="w-4.5 h-4.5 text-slate-400 shrink-0 mt-0.5" />
+                                  <div>
+                                    <span className="font-bold block mb-0.5 text-slate-600 text-xs">{isTh ? 'บันทึกเพิ่มเติมจากเจ้าหน้าที่:' : 'Additional Note:'}</span>
+                                    <div className="text-slate-800 font-medium">{request.rejectionReason}</div>
+                                  </div>
+                                </div>
+                              )}
+                            </motion.div>
+                          );
+                        })}
 
                     {/* Fallback when no item matches current filter */}
                     {resultsForYear.filter(request => statusFilter === 'ทั้งหมด' ? true : request.status === statusFilter).length === 0 && (
@@ -597,10 +491,11 @@ export default function StatusCheckSection({ initialStudentId = '', showToast }:
                         <Filter className="w-8 h-8 text-slate-400 mx-auto opacity-70" />
                         <h5 className="font-bold text-slate-700">ไม่มีประวัติคำร้องในสถานะนี้</h5>
                         <p className="text-xs text-slate-400">
-                          คุณไม่มีประวัติการส่งคำร้องที่มีสถานะเป็น "{statusFilter}" ในปี พ.ศ. {selectedYear}
+                          {isTh ? `คุณไม่มีประวัติการส่งคำร้องที่มีสถานะเป็น "${statusFilter}" ในปี พ.ศ. ${selectedYear}` : `No records found with status "${getTabLabel(statusFilter)}" in year ${selectedYear - 543}`}
                         </p>
                       </div>
                     )}
+                    </div> {/* Close results list div */}
                   </div>
                 ) : (
                   /* No results fallback design */
@@ -609,9 +504,9 @@ export default function StatusCheckSection({ initialStudentId = '', showToast }:
                       <Search className="w-6 h-6" />
                     </div>
                     <div>
-                      <h4 className="font-semibold text-slate-800 font-sans text-base">ไม่พบรายงานคำร้องของคุณ</h4>
+                      <h4 className="font-semibold text-slate-800 font-sans text-base">{t('statusNoRecords')}</h4>
                       <p className="text-slate-400 text-xs font-sans mt-1 max-w-sm mx-auto">
-                        ไม่พบคำร้องสำรองที่นั่งสำหรับรหัสประจำตัวนักศึกษา "{studentId}" ในระบบ หากคุณเพิ่งส่งคำร้อง โปรดกรอกข้อมูลให้ถูกต้องอีกครั้ง
+                        {t('statusNoRecordsSub')}
                       </p>
                     </div>
                   </div>

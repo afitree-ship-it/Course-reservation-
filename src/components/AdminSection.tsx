@@ -26,10 +26,11 @@ import {
   Database,
   Copy,
   Check,
-  Settings
+  Settings, Key, Trash2, User,
+  Edit
 } from 'lucide-react';
 import { ReservationRequest, RequestStatus } from '../types';
-import { adminLogin, getAllRequests, updateStatus, updateCourseStatus, saveApiUrl, getApiUrl, isApiConfigured } from '../services/api';
+import { adminLogin, addAdminPassword, getSavedAdminPasswords, removeAdminPassword, getAllRequests, updateStatus, updateCourseStatus, saveApiUrl, getApiUrl, isApiConfigured, getLoggedInAdminName, adminLogout } from '../services/api';
 
 interface AdminSectionProps {
   isInitiallyLoggedIn: boolean;
@@ -48,9 +49,34 @@ export default function AdminSection({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loggedInName, setLoggedInName] = useState(getLoggedInAdminName());
 
   // Google Sheet Integration configuration states
   const [showGoogleSheetSettings, setShowGoogleSheetSettings] = useState(false);
+
+  
+  const [showPasswordManager, setShowPasswordManager] = useState(false);
+  const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [newAdminName, setNewAdminName] = useState('');
+  const [savedPasswords, setSavedPasswords] = useState<{hash: string, name: string, addedAt: string}[]>([]);
+
+  useEffect(() => {
+    setLoggedInName(getLoggedInAdminName());
+  }, [isInitiallyLoggedIn]);
+
+  useEffect(() => {
+    if (showPasswordManager) {
+      getSavedAdminPasswords().then(setSavedPasswords);
+    }
+  }, [showPasswordManager]);
+
+  const handleDeletePassword = async (hash: string) => {
+    await removeAdminPassword(hash);
+    setSavedPasswords(prev => prev.filter(p => p.hash !== hash));
+    showToast('ลบรหัสผ่านออกจากอุปกรณ์นี้แล้ว', 'success');
+  };
+
+
   const [gasUrlInput, setGasUrlInput] = useState(getApiUrl());
   const [isCopied, setIsCopied] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
@@ -58,8 +84,26 @@ export default function AdminSection({
   // Core administrative states
   const [requests, setRequests] = useState<ReservationRequest[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<'ทั้งหมด' | RequestStatus>('ทั้งหมด');
+  const [statusFilter, setStatusFilter] = useState<'ทั้งหมด' | RequestStatus>('รอดำเนินการ');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Year filter state (Buddhist Era)
+  const currentBEYear = new Date().getFullYear() + 543;
+  const [selectedYear, setSelectedYear] = useState<number>(currentBEYear);
+
+  const availableYears = React.useMemo(() => {
+    const yearsSet = new Set<number>();
+    yearsSet.add(currentBEYear); // Always include current year
+    requests.forEach(r => {
+      try {
+        const year = new Date(r.createdAt).getFullYear() + 543;
+        if (!isNaN(year)) {
+          yearsSet.add(year);
+        }
+      } catch (e) {}
+    });
+    return Array.from(yearsSet).sort((a, b) => b - a);
+  }, [requests, currentBEYear]);
 
   // Modals / Interactivity
   const [rejectionRequestId, setRejectionRequestId] = useState<string | null>(null);
@@ -68,6 +112,12 @@ export default function AdminSection({
   const [isSubmittingRejection, setIsSubmittingRejection] = useState(false);
 
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
+
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
 
   // Handle auto-load on successful login
   useEffect(() => {
@@ -238,10 +288,12 @@ function doGet(e) {
           }
           
           requestMap[reqId].courses.push({
-            courseCode: row[6],
-            courseName: row[7],
-            section: row[8],
-            instructor: row[9]
+            courseCode: row[7],
+            courseName: row[8],
+            section: row[9],
+            instructor: row[10],
+            status: row[14] || "รอดำเนินการ",
+            rejectionReason: row[15] || ""
           });
         }
       }
@@ -284,10 +336,12 @@ function doGet(e) {
         }
         
         requestMap[reqId].courses.push({
-          courseCode: row[6],
-          courseName: row[7],
-          section: row[8],
-          instructor: row[9]
+          courseCode: row[7],
+          courseName: row[8],
+          section: row[9],
+          instructor: row[10],
+          status: row[14] || "รอดำเนินการ",
+          rejectionReason: row[15] || ""
         });
       }
       
@@ -400,11 +454,13 @@ function doPost(e) {
       var rows = sheet.getDataRange().getValues();
       var updatedCount = 0;
       
+      var searchId = String(requestId).trim();
       for (var i = 1; i < rows.length; i++) {
         var row = rows[i];
-        if (row[0] === requestId) {
-          sheet.getRange(i + 1, 14).setValue(status);
-          sheet.getRange(i + 1, 15).setValue(rejectionReason);
+        var rowId = String(row[0]).trim();
+        if (rowId === searchId || rowId.replace("REQ-", "") === searchId.replace("REQ-", "")) {
+          sheet.getRange(i + 1, 15).setValue(status);
+          sheet.getRange(i + 1, 16).setValue(rejectionReason);
           updatedCount++;
         }
       }
@@ -423,11 +479,15 @@ function doPost(e) {
       var rows = sheet.getDataRange().getValues();
       var updatedCount = 0;
       
+      var searchId = String(requestId).trim();
+      var searchCourseCode = String(courseCode).trim();
       for (var i = 1; i < rows.length; i++) {
         var row = rows[i];
-        if (row[0] === requestId && row[6] === courseCode) {
-          sheet.getRange(i + 1, 14).setValue(status);
-          sheet.getRange(i + 1, 15).setValue(rejectionReason);
+        var rowId = String(row[0]).trim();
+        var rowCourseCode = String(row[7]).trim();
+        if ((rowId === searchId || rowId.replace("REQ-", "") === searchId.replace("REQ-", "")) && rowCourseCode === searchCourseCode) {
+          sheet.getRange(i + 1, 15).setValue(status);
+          sheet.getRange(i + 1, 16).setValue(rejectionReason);
           updatedCount++;
         }
       }
@@ -460,6 +520,7 @@ function doPost(e) {
       const response = await adminLogin(password);
       if (response.success) {
         showToast('เข้าสู่ระบบของเจ้าหน้าที่คณะเรียบร้อยแล้ว', 'success');
+        setLoggedInName(response.name || 'แอดมินระบบ');
         onLoginSuccess();
         // Fetch values immediately
         fetchRequests();
@@ -473,40 +534,110 @@ function doPost(e) {
     }
   };
 
+  const handleLogout = () => {
+    adminLogout();
+    setLoggedInName('');
+    onLogout();
+  };
+
   // Status modification functions
-  const handleApprove = async (id: string) => {
-    if (window.confirm('คุณต้องการอนุมัติคำร้องสำรองที่นั่งวิชาเรียนนี้ใช่หรือไม่?')) {
-      showToast('กำลังทำการบันทึกข้อมูลการอนุมัติ...', 'info');
-      try {
-        const result = await updateStatus(id, 'อนุมัติแล้ว');
-        if (result.success) {
-          showToast('อนุมัติสิทธิ์และบันทึกผลเข้าระบบสำเร็จ', 'success');
-          // Optimistically update screen or reload
-          setRequests(prev => prev.map(req => req.id === id ? { ...req, status: 'อนุมัติแล้ว', rejectionReason: undefined } : req));
-        } else {
-          showToast(result.error || 'ไม่สามารถทำรายการได้', 'error');
-        }
-      } catch (err) {
-        showToast('เกิดข้อผิดพลาดการสื่อสารกับเว็บบอร์ดอัปเดตพนักงาน', 'error');
+  
+  const executeApprove = async (id: string) => {
+    // Optimistic UI Update
+    const previousRequests = [...requests];
+    const adminUser = loggedInName || 'แอดมินระบบ';
+    setRequests(prev => prev.map(req => {
+      if (req.id === id) {
+        const updatedCourses = req.courses.map(c => ({
+          ...c,
+          status: 'อนุมัติแล้ว' as RequestStatus,
+          rejectionReason: undefined,
+          processedBy: adminUser,
+          processedAt: new Date().toISOString()
+        }));
+        return { 
+          ...req, 
+          status: 'อนุมัติแล้ว', 
+          rejectionReason: undefined,
+          courses: updatedCourses,
+          processedBy: adminUser,
+          processedAt: new Date().toISOString()
+        };
       }
+      return req;
+    }));
+    
+    // Background execution
+    try {
+      const result = await updateStatus(id, 'อนุมัติแล้ว', undefined, adminUser);
+      if (result.success) {
+        if (result.data) {
+          setRequests(prev => prev.map(req => req.id === id ? result.data! : req));
+        }
+      } else {
+        setRequests(previousRequests);
+        showToast(result.error || 'ไม่สามารถทำรายการได้', 'error');
+      }
+    } catch (err) {
+      setRequests(previousRequests);
+      showToast('เกิดข้อผิดพลาดการสื่อสารกับเว็บบอร์ดอัปเดตพนักงาน', 'error');
     }
   };
 
-  const handleResetToPending = async (id: string) => {
-    if (window.confirm('คุณต้องการยกเลิกการตัดสินใจ และเปลี่ยนสถานะคำร้องนี้ให้กลับสู่ "รอดำเนินการ" ใช่หรือไม่?')) {
-      showToast('กำลังปรับสถานะคำร้อง...', 'info');
-      try {
-        const result = await updateStatus(id, 'รอดำเนินการ');
-        if (result.success) {
-          showToast('แก้ไขสลับเปลี่ยนสถานะคำร้องกลับมาที่สถานะ "รอดำเนินการ" สำเร็จ', 'success');
-          setRequests(prev => prev.map(req => req.id === id ? { ...req, status: 'รอดำเนินการ', rejectionReason: undefined } : req));
-        } else {
-          showToast(result.error || 'ไม่สามารถแก้ไขสถานะได้', 'error');
-        }
-      } catch (err) {
-        showToast('เกิดข้อผิดพลาดการเชื่อมต่อระบบ', 'error');
+
+  const handleApprove = (id: string) => {
+    setConfirmDialog({
+      title: 'ยืนยันการอนุมัติคำร้อง',
+      message: 'คุณต้องการอนุมัติคำร้องสำรองที่นั่งวิชาเรียนนี้ใช่หรือไม่?',
+      onConfirm: () => executeApprove(id)
+    });
+  };
+
+  
+  const executeResetToPending = async (id: string) => {
+    // Optimistic Update
+    const previousRequests = [...requests];
+    setRequests(prev => prev.map(req => {
+      if (req.id === id) {
+        const updatedCourses = req.courses.map(c => ({
+          ...c,
+          status: 'รอดำเนินการ' as RequestStatus,
+          rejectionReason: undefined,
+          processedAt: undefined
+        }));
+        return { 
+          ...req, 
+          status: 'รอดำเนินการ', 
+          rejectionReason: undefined,
+          courses: updatedCourses,
+          processedAt: undefined
+        };
       }
+      return req;
+    }));
+
+    try {
+      const result = await updateStatus(id, 'รอดำเนินการ');
+      if (result.success) {
+        if (result.data) {
+          setRequests(prev => prev.map(req => req.id === id ? result.data! : req));
+        }
+      } else {
+        setRequests(previousRequests);
+        showToast(result.error || 'ไม่สามารถแก้ไขสถานะได้', 'error');
+      }
+    } catch (err) {
+      setRequests(previousRequests);
+      showToast('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
     }
+  };
+
+  const handleResetToPending = (id: string) => {
+    setConfirmDialog({
+      title: 'ยืนยันการเปลี่ยนสถานะกลับ',
+      message: 'คุณต้องการยกเลิกการตัดสินใจ และเปลี่ยนสถานะคำร้องนี้ให้กลับสู่ "รอดำเนินการ" ใช่หรือไม่?',
+      onConfirm: () => executeResetToPending(id)
+    });
   };
 
   const handleOpenRejectModal = (id: string) => {
@@ -521,111 +652,156 @@ function doPost(e) {
     setRejectionReason('');
   };
 
+  
   const handleApproveCourse = async (requestId: string, courseCode: string) => {
-    showToast(`กำลังบันทึกอนุมัติวิชา ${courseCode}...`, 'info');
+    // Optimistic Update
+    const previousRequests = [...requests];
+    const adminUser = loggedInName || 'แอดมินระบบ';
+    setRequests(prev => prev.map(req => {
+      if (req.id === requestId) {
+        const updatedCourses = req.courses.map(c => c.courseCode === courseCode ? { ...c, status: 'อนุมัติแล้ว' as RequestStatus, rejectionReason: undefined, processedBy: adminUser, processedAt: new Date().toISOString() } : c);
+        const allApproved = updatedCourses.every(c => c.status === 'อนุมัติแล้ว');
+        let newStatus = req.status;
+        let newProcessedBy = req.processedBy;
+        if (allApproved) {
+          newStatus = 'อนุมัติแล้ว';
+          newProcessedBy = adminUser;
+        }
+        return { ...req, courses: updatedCourses, status: newStatus, processedBy: newProcessedBy };
+      }
+      return req;
+    }));
+
     try {
-      const result = await updateCourseStatus(requestId, courseCode, 'อนุมัติแล้ว');
+      const result = await updateCourseStatus(requestId, courseCode, 'อนุมัติแล้ว', undefined, adminUser);
       if (result.success) {
-        showToast(`อนุมัติสิทธิ์รายวิชา ${courseCode} สำเร็จ`, 'success');
         if (result.data) {
           setRequests(prev => prev.map(req => req.id === requestId ? result.data! : req));
-        } else {
-          setRequests(prev => prev.map(req => {
-            if (req.id === requestId) {
-              const updatedCourses = req.courses.map(c => c.courseCode === courseCode ? { ...c, status: 'อนุมัติแล้ว' } : c);
-              const allApproved = updatedCourses.every(c => c.status === 'อนุมัติแล้ว');
-              let newStatus = req.status;
-              if (allApproved) newStatus = 'อนุมัติแล้ว';
-              return { ...req, courses: updatedCourses, status: newStatus };
-            }
-            return req;
-          }));
         }
       } else {
-        showToast(result.error || 'ไม่สามารถบันทึกได้', 'error');
+        setRequests(previousRequests);
+        showToast(result.error || 'ไม่สามารถทำรายการได้', 'error');
       }
     } catch (err) {
+      setRequests(previousRequests);
+      showToast('เกิดข้อผิดพลาด', 'error');
+    }
+  };
+
+  
+  const executeResetCourseToPending = async (requestId: string, courseCode: string) => {
+    // Optimistic Update
+    const previousRequests = [...requests];
+    setRequests(prev => prev.map(req => {
+      if (req.id === requestId) {
+        const updatedCourses = req.courses.map(c => c.courseCode === courseCode ? { ...c, status: 'รอดำเนินการ' as RequestStatus, rejectionReason: undefined, processedAt: undefined } : c);
+        return { ...req, courses: updatedCourses, status: 'รอดำเนินการ' };
+      }
+      return req;
+    }));
+
+    try {
+      const result = await updateCourseStatus(requestId, courseCode, 'รอดำเนินการ');
+      if (result.success) {
+        if (result.data) {
+          setRequests(prev => prev.map(req => req.id === requestId ? result.data! : req));
+        }
+      } else {
+        setRequests(previousRequests);
+        showToast(result.error || 'ไม่สามารถแก้ไขสถานะได้', 'error');
+      }
+    } catch (err) {
+      setRequests(previousRequests);
       showToast('เกิดข้อผิดพลาดในการเชื่อมต่อ', 'error');
     }
   };
 
-  const handleResetCourseToPending = async (requestId: string, courseCode: string) => {
-    if (window.confirm(`คุณต้องการเปลี่ยนสถานะรายวิชา ${courseCode} กลับสู่ "รอดำเนินการ" ใช่หรือไม่?`)) {
-      showToast(`กำลังปรับรายวิชา ${courseCode} โหมดการดำเนินการ...`, 'info');
-      try {
-        const result = await updateCourseStatus(requestId, courseCode, 'รอดำเนินการ');
-        if (result.success) {
-          showToast(`รีเซ็ตวิชา ${courseCode} กลับสู่รอดำเนินการสำเร็จ`, 'success');
-          if (result.data) {
-            setRequests(prev => prev.map(req => req.id === requestId ? result.data! : req));
-          } else {
-            setRequests(prev => prev.map(req => {
-              if (req.id === requestId) {
-                const updatedCourses = req.courses.map(c => c.courseCode === courseCode ? { ...c, status: 'รอดำเนินการ', rejectionReason: undefined } : c);
-                return { ...req, courses: updatedCourses, status: 'รอดำเนินการ' as RequestStatus };
-              }
-              return req;
-            }));
-          }
-        } else {
-          showToast(result.error || 'เกิดข้อผิดพลาดในการคืนสถานะ', 'error');
-        }
-      } catch (err) {
-        showToast('เกิดข้อผิดพลาดในการเชื่อมต่อ', 'error');
-      }
-    }
+  const handleResetCourseToPending = (requestId: string, courseCode: string) => {
+    setConfirmDialog({
+      title: 'ยืนยันการเปลี่ยนสถานะวิชาเรียน',
+      message: `คุณต้องการเปลี่ยนสถานะรายวิชา ${courseCode} กลับสู่ "รอดำเนินการ" ใช่หรือไม่?`,
+      onConfirm: () => executeResetCourseToPending(requestId, courseCode)
+    });
   };
 
+  
   const handleConfirmRejectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rejectionRequestId) return;
     if (!rejectionReason.trim()) {
-      showToast('กรุณาระบุเหตุผลการไม่อนุมัติสิทธิ์', 'warning');
+      showToast('กรุณาระบุเหตุผลที่ไม่อนุมัติ', 'warning');
       return;
     }
-
+    
     setIsSubmittingRejection(true);
-    try {
-      if (rejectionCourseCode) {
-        // Course specific rejection
-        const result = await updateCourseStatus(rejectionRequestId, rejectionCourseCode, 'ไม่อนุมัติ', rejectionReason.trim());
-        if (result.success) {
-          showToast(`ไม่อนุมัติสิทธิ์รายวิชา ${rejectionCourseCode} สำเร็จ`, 'success');
-          if (result.data) {
-            setRequests(prev => prev.map(req => req.id === rejectionRequestId ? result.data! : req));
-          } else {
-            setRequests(prev => prev.map(req => {
-              if (req.id === rejectionRequestId) {
-                const updatedCourses = req.courses.map(c => c.courseCode === rejectionCourseCode ? { ...c, status: 'ไม่อนุมัติ', rejectionReason: rejectionReason.trim() } : c);
-                const anyRejected = updatedCourses.some(c => c.status === 'ไม่อนุมัติ');
-                const allReviewed = updatedCourses.every(c => c.status === 'อนุมัติแล้ว' || c.status === 'ไม่อนุมัติ');
-                let newStatus = req.status;
-                if (allReviewed) {
-                  newStatus = anyRejected ? 'ไม่อนุมัติ' : 'อนุมัติแล้ว';
-                }
-                return { ...req, courses: updatedCourses, status: newStatus };
-              }
-              return req;
-            }));
+    
+    // Optimistic Update
+    const previousRequests = [...requests];
+    const isCourseLevel = !!rejectionCourseCode;
+    const adminUser = loggedInName || 'แอดมินระบบ';
+    
+    setRequests(prev => prev.map(req => {
+      if (req.id === rejectionRequestId) {
+        if (isCourseLevel) {
+          const updatedCourses = req.courses.map(c => c.courseCode === rejectionCourseCode ? { ...c, status: 'ไม่อนุมัติ' as RequestStatus, rejectionReason: rejectionReason.trim(), processedBy: adminUser, processedAt: new Date().toISOString() } : c);
+          let newStatus = req.status;
+          const allRejected = updatedCourses.every(c => c.status === 'ไม่อนุมัติ');
+          let newProcessedBy = req.processedBy;
+          if (allRejected) {
+            newStatus = 'ไม่อนุมัติ';
+            newProcessedBy = adminUser;
           }
-          setRejectionRequestId(null);
-          setRejectionCourseCode(null);
+          return { ...req, courses: updatedCourses, status: newStatus, processedBy: newProcessedBy };
         } else {
-          showToast(result.error || 'เกิดข้อผิดพลาดในการบันทึกไม่อนุมัติรายวิชา', 'error');
+          const updatedCourses = req.courses.map(c => ({
+            ...c,
+            status: 'ไม่อนุมัติ' as RequestStatus,
+            rejectionReason: rejectionReason.trim(),
+            processedBy: adminUser,
+            processedAt: new Date().toISOString()
+          }));
+          return {
+            ...req,
+            status: 'ไม่อนุมัติ',
+            rejectionReason: rejectionReason.trim(),
+            courses: updatedCourses,
+            processedBy: adminUser,
+            processedAt: new Date().toISOString()
+          };
+        }
+      }
+      return req;
+    }));
+    
+    // Close modal immediately for snappy UI
+    const targetRequestId = rejectionRequestId;
+    const targetCourseCode = rejectionCourseCode;
+    const targetReason = rejectionReason.trim();
+    
+    setRejectionRequestId(null);
+    setRejectionCourseCode(null);
+    setRejectionReason('');
+
+    try {
+      if (isCourseLevel) {
+        const result = await updateCourseStatus(targetRequestId, targetCourseCode!, 'ไม่อนุมัติ', targetReason, adminUser);
+        if (result.success && result.data) {
+          setRequests(prev => prev.map(req => req.id === targetRequestId ? result.data! : req));
+        } else if (!result.success) {
+          setRequests(previousRequests);
+          showToast(result.error || 'ไม่สามารถทำรายการได้', 'error');
         }
       } else {
-        // Whole request rejection
-        const result = await updateStatus(rejectionRequestId, 'ไม่อนุมัติ', rejectionReason.trim());
-        if (result.success) {
-          showToast('ไม่อนุมัติสิทธิ์คำร้องและส่งเหตุผลสำเร็จ', 'success');
-          setRequests(prev => prev.map(req => req.id === rejectionRequestId ? { ...req, status: 'ไม่อนุมัติ', rejectionReason: rejectionReason.trim() } : req));
-          setRejectionRequestId(null);
-        } else {
-          showToast(result.error || 'เกิดข้อผิดพลาดในการส่งข้อมูลปฏิเสธ', 'error');
+        const result = await updateStatus(targetRequestId, 'ไม่อนุมัติ', targetReason, adminUser);
+        if (result.success && result.data) {
+          setRequests(prev => prev.map(req => req.id === targetRequestId ? result.data! : req));
+        } else if (!result.success) {
+          setRequests(previousRequests);
+          showToast(result.error || 'ไม่สามารถทำรายการได้', 'error');
         }
       }
     } catch (err) {
-      showToast('เกิดข้อผิดพลาดในการพิจารณาคำร้อง', 'error');
+      setRequests(previousRequests);
+      showToast('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
     } finally {
       setIsSubmittingRejection(false);
     }
@@ -656,6 +832,16 @@ function doPost(e) {
     if (statusFilter !== 'ทั้งหมด') {
       filtered = filtered.filter(req => req.status === statusFilter);
     }
+
+    // Filter by selected year BE (Buddhist Era)
+    filtered = filtered.filter(req => {
+      try {
+        const year = new Date(req.createdAt).getFullYear() + 543;
+        return year === selectedYear;
+      } catch (e) {
+        return selectedYear === currentBEYear;
+      }
+    });
 
     // Sort: Pending ("รอดำเนินการ") first, then newest submission dates
     return filtered.sort((a, b) => {
@@ -711,7 +897,7 @@ function doPost(e) {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="รหัสเข้าใช้จำลองคือ admin"
+                  placeholder="••••••••"
                   className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50 hover:bg-white text-sm font-sans tracking-widest transition-all focus:outline-hidden focus:border-mangosteen focus:ring-4 focus:ring-mangosteen/20"
                   id="admin-password-input"
                 />
@@ -741,9 +927,7 @@ function doPost(e) {
             </button>
           </form>
 
-          <div className="text-slate-400 text-[10px] font-mono leading-relaxed bg-slate-50 p-2 rounded-lg">
-            ℹ️ ในโหมด Demo สามารถกรอก <strong className="text-mangosteen">admin</strong> เข้าใช้งานได้ทันที
-          </div>
+          
         </div>
       </motion.div>
     );
@@ -770,22 +954,38 @@ function doPost(e) {
             </p>
           </div>
           
-          <div className="flex items-center gap-2 self-stretch sm:self-auto">
+          <div className="flex items-center gap-2 self-stretch sm:self-auto flex-wrap sm:flex-nowrap">
+            {loggedInName && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-mangosteen/15 text-mangosteen border border-mangosteen/25 rounded-lg text-xs font-bold font-sans">
+                <User className="w-3.5 h-3.5 text-mangosteen" />
+                <span>เจ้าหน้าที่: {loggedInName}</span>
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowPasswordManager(true)}
+              className="flex-1 sm:flex-initial px-2.5 py-1.5 text-[10px] font-semibold font-sans rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 border bg-slate-50 text-slate-400 border-slate-200/60 hover:text-slate-600 hover:bg-slate-100 hover:border-slate-300"
+              title="เพิ่มรหัสผ่านเจ้าหน้าที่"
+            >
+              <Key className="w-3.5 h-3.5 text-slate-400" />
+              จัดการรหัสผ่าน
+            </button>
+
             <button
               onClick={() => setShowGoogleSheetSettings(!showGoogleSheetSettings)}
-              className={`flex-1 sm:flex-initial px-4 py-2 text-xs font-bold font-sans rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 border ${
+              className={`flex-1 sm:flex-initial px-2.5 py-1.5 text-[10px] font-semibold font-sans rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 border ${
                 showGoogleSheetSettings
-                  ? 'bg-mangosteen text-white border-mangosteen'
-                  : 'bg-white text-slate-700 border-slate-200 hover:border-mangosteen/30 hover:bg-slate-50/50'
+                  ? 'bg-slate-200 text-slate-750 border-slate-300 shadow-inner'
+                  : 'bg-slate-50 text-slate-400 border-slate-200/60 hover:text-slate-600 hover:bg-slate-100 hover:border-slate-300'
               }`}
               id="btn-toggle-sheet-settings"
             >
-              <Settings className="w-4 h-4" />
-              {showGoogleSheetSettings ? 'ปิดตั้งค่า' : 'ตั้งค่า Google Sheet'}
+              <Settings className="w-3.5 h-3.5 text-slate-400" />
+              {showGoogleSheetSettings ? 'ปิดตั้งค่าฐานข้อมูล' : 'ตั้งค่าฐานข้อมูล (แอดมิน)'}
             </button>
             
             <button
-              onClick={onLogout}
+              onClick={handleLogout}
               className="px-3.5 py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-500 rounded-lg text-xs font-bold font-sans flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-transparent hover:border-rose-100"
               id="btn-admin-logout"
               title="ออกจากระบบเจ้าหน้าที่"
@@ -915,7 +1115,7 @@ function doPost(e) {
         </AnimatePresence>
 
         {/* Filters and search panel */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4" id="admin-filters-bar">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border-t border-slate-100 pt-4" id="admin-filters-bar">
           {/* Searching */}
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -929,6 +1129,22 @@ function doPost(e) {
               className="w-full pl-9 pr-4 py-2 text-xs font-sans rounded-lg border border-slate-200 focus:outline-hidden focus:border-mangosteen focus:ring-1 focus:ring-mangosteen"
               id="admin-search-query"
             />
+          </div>
+
+          {/* Year Selector */}
+          <div className="relative">
+            <select
+              value={selectedYear}
+              onChange={e => setSelectedYear(Number(e.target.value))}
+              className="w-full px-3 py-2 text-xs font-semibold font-sans rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-hidden focus:border-mangosteen focus:ring-1 focus:ring-mangosteen cursor-pointer"
+              id="admin-year-selector"
+            >
+              {availableYears.map(year => (
+                <option key={year} value={year}>
+                  ปี พ.ศ. {year} {year === currentBEYear ? '(ปีปัจจุบัน)' : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Tab Filter Button Row */}
@@ -950,10 +1166,16 @@ function doPost(e) {
                   id={`btn-filter-status-${tab}`}
                 >
                   {tab}
-                  <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 text-slate-600 font-bold font-sans">
+                  <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-150 text-slate-600 font-bold font-sans">
                     {tab === 'ทั้งหมด' 
-                      ? requests.length 
-                      : requests.filter(r => r.status === tab).length}
+                      ? requests.filter(r => {
+                          const year = new Date(r.createdAt).getFullYear() + 543;
+                          return year === selectedYear;
+                        }).length 
+                      : requests.filter(r => {
+                          const year = new Date(r.createdAt).getFullYear() + 543;
+                          return year === selectedYear && r.status === tab;
+                        }).length}
                   </span>
                 </button>
               );
@@ -991,9 +1213,8 @@ function doPost(e) {
                     <th className="py-3 px-4 w-28">รหัสคำร้อง</th>
                     <th className="py-3 px-4">ข้อมูลนักศึกษา</th>
                     <th className="py-3 px-4">สาขาวิชา/รุ่นปี</th>
+                    <th className="py-3 px-4">ช่องทางติดต่อ</th>
                     <th className="py-3 px-4">รายวิชาที่ลง</th>
-                    <th className="py-3 px-4">หลักฐาน</th>
-                    <th className="py-3 px-4">สถานะล่าสุด</th>
                     <th className="py-3 px-4 text-center">จัดการคำขอ</th>
                   </tr>
                 </thead>
@@ -1015,11 +1236,6 @@ function doPost(e) {
                           </span>
                           <span className="font-extrabold text-slate-800 text-sm block">คุณ{req.fullName}</span>
                         </div>
-                        
-                        <div className="flex items-center gap-1.5 text-slate-500 text-[11px]">
-                          <Phone className="w-3.5 h-3.5 text-slate-400" />
-                          <a href={`tel:${req.phone}`} className="hover:text-mangosteen underline font-medium">{req.phone}</a>
-                        </div>
                       </td>
 
                       {/* Dept & Session Year Info */}
@@ -1031,6 +1247,38 @@ function doPost(e) {
                           สาขา: {req.department}
                         </div>
                         <div className="text-slate-400 font-medium text-[10px]">ชั้นปีที่ {req.year}</div>
+                      </td>
+
+                      {/* Contact Channel & Proof */}
+                      <td className="py-4 px-4 font-sans border-b border-slate-150">
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-1.5 text-slate-700">
+                            <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <a href={`tel:${req.phone}`} className="hover:text-mangosteen underline font-bold select-all">{req.phone}</a>
+                          </div>
+                          <div>
+                            {req.proofType === 'file' && req.facebookProofFile ? (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewImage({ url: req.facebookProofFile!.dataUrl, title: `ภาพแคปเจอร์สิทธิ์การเข้าร่วม Facebook จากคุณ ${req.fullName}` })}
+                                className="bg-slate-100 border border-slate-200 hover:border-mangosteen hover:bg-white text-mangosteen px-2 py-1.5 rounded-lg text-[10px] inline-flex items-center gap-1.5 transition-colors font-bold cursor-pointer shadow-3xs"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                ภาพหลักฐาน FB
+                              </button>
+                            ) : (
+                              <a
+                                href={req.facebookProofLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="bg-slate-100 border border-slate-200 hover:border-sky-500 hover:bg-white text-sky-700 px-2 py-1.5 rounded-lg text-[10px] inline-flex items-center gap-1.5 transition-colors font-bold shadow-3xs"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                ลิงก์กลุ่ม FB
+                              </a>
+                            )}
+                          </div>
+                        </div>
                       </td>
 
                       {/* Highlight Courses: Code, Name, Section, Instructor */}
@@ -1119,85 +1367,99 @@ function doPost(e) {
                                   <strong>เหตุผล:</strong> {course.rejectionReason}
                                 </div>
                               )}
+
+                              {/* Processor attribution per course */}
+                              {course.status && course.status !== 'รอดำเนินการ' && course.processedBy && (
+                                <div className="text-[9px] text-slate-400 font-sans flex items-center gap-1 mt-1.5 justify-end">
+                                  <User className="w-2.5 h-2.5" />
+                                  <span>ผู้ปรับสถานะ: {course.processedBy}</span>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
                       </td>
 
-                      {/* Verification Link / screenshot */}
-                      <td className="py-4 px-4 font-sans border-b border-slate-150">
-                        {req.proofType === 'file' && req.facebookProofFile ? (
-                          <button
-                            type="button"
-                            onClick={() => setPreviewImage({ url: req.facebookProofFile!.dataUrl, title: `ภาพแคปเจอร์สิทธิ์การเข้าร่วม Facebook จากคุณ ${req.fullName}` })}
-                            className="bg-slate-100 border border-slate-200 hover:border-mangosteen hover:bg-white text-mangosteen px-2 py-1.5 rounded-lg text-[10px] inline-flex items-center gap-1.5 transition-colors font-semibold cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            ตรวจสอบรูปภาพ
-                          </button>
-                        ) : (
-                          <a
-                            href={req.facebookProofLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="bg-slate-100 border border-slate-200 hover:border-sky-500 hover:bg-white text-sky-700 px-2 py-1.5 rounded-lg text-[10px] inline-flex items-center gap-1.5 transition-colors font-semibold"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            ลิ้งค์ผลลัพธ์ FB
-                          </a>
-                        )}
-                      </td>
-
-                      {/* Highlight Approval Status + Comment visual display */}
-                      <td className="py-4 px-4 font-sans border-b border-slate-150">
-                        <div className="space-y-2">
-                          <div>
-                            {req.status === 'รอดำเนินการ' && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 animate-pulse">
-                                <Clock className="w-3 h-3 text-amber-500" />
-                                รอดำเนินการ
-                              </span>
-                            )}
-                            {req.status === 'อนุมัติแล้ว' && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-250">
-                                <CheckCircle className="w-3 h-3 text-emerald-600" />
-                                อนุมัติแล้ว
-                              </span>
-                            )}
-                            {req.status === 'ไม่อนุมัติ' && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-rose-50 text-rose-700 border border-rose-250">
-                                <XCircle className="w-3 h-3 text-rose-600" />
-                                ไม่อนุมัติ
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Remarks display under any status (กรณีจะแจ้งให้คนส่งคำร้องได้รู้) */}
-                          {req.rejectionReason ? (
-                            <div className="bg-slate-50 border border-slate-150 rounded-lg p-2 text-[10px] text-slate-700 max-w-[160px] leading-relaxed break-words font-sans relative">
-                              <span className="font-bold text-slate-500 block mb-0.5">📝 หมายเหตุ:</span>
-                              <span className="font-semibold">{req.rejectionReason}</span>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] text-slate-350 block italic">ไม่มีบันทึกหมายเหตุ</span>
-                          )}
-                        </div>
-                      </td>
-
                       {/* Action columns */}
-                      <td className="py-4 px-4 font-sans text-center border-b border-slate-150">
-                        <div className="flex flex-col gap-1.5 items-center justify-center" id={`action-panel-desktop-${req.id}`}>
+                      <td className="py-4 px-4 font-sans text-center border-b border-slate-150 w-60">
+                        <div className="flex flex-col gap-2 items-center justify-center" id={`action-panel-desktop-${req.id}`}>
                           {req.status === 'รอดำเนินการ' ? (
-                            <div className="text-[10px] text-slate-500 italic">
-                              เลือกพิจารณา<br/>เป็นรายวิชา
+                            <div className="w-full space-y-2">
+                              {/* Global action buttons for quick review */}
+                              <button
+                                onClick={() => handleApprove(req.id)}
+                                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-sans text-xs font-black rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                              >
+                                <CheckCircle className="w-4 h-4" /> อนุมัติทั้งหมด
+                              </button>
+                              <button
+                                onClick={() => handleOpenRejectModal(req.id)}
+                                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white font-sans text-xs font-black rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                              >
+                                <XCircle className="w-4 h-4" /> ไม่อนุมัติทั้งหมด
+                              </button>
+
+                              {/* If multiple courses, show split actions list to make it easier to locate */}
+                              {req.courses && req.courses.length > 1 && (
+                                <div className="border-t border-slate-100 pt-2 mt-2 space-y-1.5 text-left">
+                                  <span className="text-[10px] font-bold text-slate-400 block text-center">หรือพิจารณาแยกวิชา:</span>
+                                  {req.courses.map((course, cIdx) => (
+                                    <div key={cIdx} className="space-y-1 bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                      <div className="flex items-center justify-between text-[10px] font-extrabold text-slate-700">
+                                        <span className="truncate max-w-[100px]">วิชา {course.courseCode}:</span>
+                                        <span className={`px-1.5 rounded text-[9px] ${
+                                          !course.status || course.status === 'รอดำเนินการ'
+                                            ? 'bg-amber-100 text-amber-700'
+                                            : course.status === 'อนุมัติแล้ว'
+                                              ? 'bg-emerald-100 text-emerald-700'
+                                              : 'bg-rose-100 text-rose-700'
+                                        }`}>{course.status || 'รอดำเนินการ'}</span>
+                                      </div>
+                                      {(!course.status || course.status === 'รอดำเนินการ') && (
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            onClick={() => handleApproveCourse(req.id, course.courseCode)}
+                                            className="flex-1 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded cursor-pointer transition-all text-center"
+                                          >
+                                            อนุมัติ
+                                          </button>
+                                          <button
+                                            onClick={() => handleRejectCourseModalOpen(req.id, course.courseCode)}
+                                            className="flex-1 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[9px] font-bold rounded cursor-pointer transition-all text-center"
+                                          >
+                                            ปฏิเสธ
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           ) : (
-                            <button
-                              onClick={() => handleResetToPending(req.id)}
-                              className="px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
-                            >
-                              🔄 แก้ไขสถานะกลับ
-                            </button>
+                            <div className="w-full space-y-2">
+                              <div className="text-[10px] font-bold text-slate-400 space-y-0.5">
+                                <div>พิจารณาแล้ว {req.processedAt ? new Date(req.processedAt).toLocaleDateString('th-TH') : ''}</div>
+                                {req.processedBy && (
+                                  <div className="text-[9px] text-mangosteen font-semibold flex items-center justify-center gap-1 mt-0.5">
+                                    <User className="w-2.5 h-2.5" />
+                                    <span>โดย: {req.processedBy}</span>
+                                  </div>
+                                )}
+                              </div>
+                              {req.rejectionReason && (
+                                <div className="bg-rose-50 text-rose-700 border border-rose-100 rounded-lg p-2 text-[10px] text-left leading-relaxed break-words font-sans">
+                                  <strong className="block mb-0.5">📝 เหตุผลที่ไม่อนุมัติ:</strong>
+                                  <span>{req.rejectionReason}</span>
+                                </div>
+                              )}
+                              <button
+                                onClick={() => handleResetToPending(req.id)}
+                                className="w-full py-2.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1 shadow-xs active:scale-[0.98]"
+                              >
+                                <Edit className="w-3.5 h-3.5" /> แก้ไขสถานะกลับ
+                              </button>
+                            </div>
                           )}
                         </div>
                       </td>
@@ -1336,7 +1598,7 @@ function doPost(e) {
                                 className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer border border-transparent hover:border-slate-200"
                                 title="แก้ไขสถานะกลับเป็น รอดำเนินการ"
                               >
-                                <RefreshCw className="w-3.5 h-3.5" />
+                                <Edit className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           )}
@@ -1345,6 +1607,14 @@ function doPost(e) {
                         {course.status === 'ไม่อนุมัติ' && course.rejectionReason && (
                           <div className="mt-1 text-[9px] text-rose-600 bg-rose-50 p-1.5 rounded-md border border-rose-100">
                             <strong>เหตุผล:</strong> {course.rejectionReason}
+                          </div>
+                        )}
+
+                        {/* Processor attribution per course on mobile */}
+                        {course.status && course.status !== 'รอดำเนินการ' && course.processedBy && (
+                          <div className="text-[9px] text-slate-400 font-sans flex items-center gap-1 mt-1 justify-end">
+                            <User className="w-2.5 h-2.5" />
+                            <span>ผู้ปรับสถานะ: {course.processedBy}</span>
                           </div>
                         )}
                       </div>
@@ -1384,27 +1654,54 @@ function doPost(e) {
 
                   {/* Unified Remarks/Comment display on mobile card */}
                   {req.rejectionReason ? (
-                    <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-[10px] font-sans text-slate-700">
-                      <strong className="text-slate-500 block mb-0.5">📝 บันทึกหมายเหตุจากเจ้าหน้าที่:</strong>
-                      <span className="font-semibold whitespace-pre-wrap">{req.rejectionReason}</span>
+                    <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-[10px] font-sans text-slate-700 space-y-1.5">
+                      <div>
+                        <strong className="text-slate-500 block mb-0.5">📝 บันทึกหมายเหตุจากเจ้าหน้าที่:</strong>
+                        <span className="font-semibold whitespace-pre-wrap">{req.rejectionReason}</span>
+                      </div>
+                      {req.processedBy && (
+                        <div className="text-[9px] text-mangosteen font-semibold flex items-center gap-1 border-t border-slate-200/60 pt-1">
+                          <User className="w-2.5 h-2.5" />
+                          <span>ผู้พิจารณา: {req.processedBy}</span>
+                        </div>
+                      )}
                     </div>
                   ) : (
-                    <span className="text-[10px] text-slate-350 italic block pt-1">ไม่มีบันทึกหมายเหตุ</span>
+                    <div className="flex justify-between items-center text-[10px] pt-1">
+                      <span className="text-slate-350 italic">ไม่มีบันทึกหมายเหตุ</span>
+                      {req.status !== 'รอดำเนินการ' && req.processedBy && (
+                        <div className="text-mangosteen font-semibold flex items-center gap-1">
+                          <User className="w-2.5 h-2.5" />
+                          <span>โดย: {req.processedBy}</span>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
 
                 {/* Mobile action button bottom drawer */}
                 <div className="border-t border-slate-100 pt-3 flex flex-col gap-2" id={`action-panel-mobile-${req.id}`}>
                   {req.status === 'รอดำเนินการ' ? (
-                    <div className="text-xs text-slate-500 italic text-center py-1">
-                      กรุณาเลือกพิจารณาเป็นรายวิชา
+                    <div className="flex flex-col gap-2">
+                      <button
+                        onClick={() => handleApprove(req.id)}
+                        className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <CheckCircle className="w-4 h-4" /> อนุมัติคำร้องทั้งหมด
+                      </button>
+                      <button
+                        onClick={() => handleOpenRejectModal(req.id)}
+                        className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <XCircle className="w-4 h-4" /> ไม่อนุมัติคำร้องทั้งหมด
+                      </button>
                     </div>
                   ) : (
                     <button
                       onClick={() => handleResetToPending(req.id)}
-                      className="w-full py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 text-center text-xs font-bold rounded-xl transition-all cursor-pointer"
+                      className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-center text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
                     >
-                      🔄 แก้ไขสถานะกลับเป็น รอดำเนินการ
+                      <Edit className="w-3.5 h-3.5" /> แก้ไขสถานะกลับเป็น รอดำเนินการ
                     </button>
                   )}
                 </div>
@@ -1503,6 +1800,174 @@ function doPost(e) {
                   alt="High quality screenshots verification tool"
                   className="max-h-[70vh] object-contain rounded-md"
                 />
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      
+      {/* Password Manager Modal */}
+      <AnimatePresence>
+        {showPasswordManager && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="p-4 border-b border-slate-100 flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                  <Key className="w-4 h-4 text-slate-600" />
+                </div>
+                <h3 className="font-extrabold font-sans text-slate-800">จัดการรหัสผ่าน (ในอุปกรณ์นี้)</h3>
+              </div>
+              <div className="p-5 space-y-4 overflow-y-auto">
+                <div className="space-y-3">
+                  <h4 className="text-xs font-extrabold text-slate-700 font-sans border-b border-slate-100 pb-1.5 uppercase tracking-wide">ลงทะเบียนรหัสเจ้าหน้าที่ใหม่</h4>
+                  
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1 font-sans">
+                      ชื่อเจ้าหน้าที่แอดมิน <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newAdminName}
+                      onChange={e => setNewAdminName(e.target.value)}
+                      placeholder="เช่น อ.อาฟีตรี, อนันต์"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-sans focus:outline-hidden focus:border-mangosteen focus:ring-2 focus:ring-mangosteen/20 mb-2.5"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1 font-sans">
+                      รหัสผ่านสำหรับการเข้าสู่ระบบ <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={newAdminPassword}
+                        onChange={e => setNewAdminPassword(e.target.value)}
+                        placeholder="กำหนดรหัสผ่าน"
+                        className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-xs font-sans focus:outline-hidden focus:border-mangosteen focus:ring-2 focus:ring-mangosteen/20"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!newAdminName.trim()) {
+                            showToast('กรุณากรอกชื่อเจ้าหน้าที่แอดมิน', 'warning');
+                            return;
+                          }
+                          if (!newAdminPassword.trim()) {
+                            showToast('กรุณากรอกรหัสผ่านสำหรับเข้าสู่ระบบ', 'warning');
+                            return;
+                          }
+                          await addAdminPassword(newAdminPassword.trim(), newAdminName.trim());
+                          showToast('เพิ่มรหัสผ่านและชื่อเจ้าหน้าที่คณะใหม่เรียบร้อยแล้ว', 'success');
+                          setNewAdminPassword('');
+                          setNewAdminName('');
+                          const latest = await getSavedAdminPasswords();
+                          setSavedPasswords(latest);
+                        }}
+                        className="px-4 py-2 text-xs font-bold text-white bg-mangosteen hover:bg-mangosteen-hover rounded-xl transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+                      >
+                        บันทึกรหัส
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-slate-400 leading-relaxed italic">
+                    * รหัสผ่านจะถูกเข้ารหัส SHA-256 (Hash) อย่างปลอดภัยและบันทึกในอุปกรณ์นี้
+                  </p>
+                </div>
+                
+                <div className="pt-3 border-t border-slate-100">
+                  <label className="block text-xs font-extrabold text-slate-600 mb-2 font-sans uppercase tracking-wider">
+                    รหัสผ่านเจ้าหน้าที่ในระบบ ({savedPasswords.length})
+                  </label>
+                  {savedPasswords.length === 0 ? (
+                    <div className="text-center py-4 bg-slate-50 rounded-xl border border-slate-100">
+                      <p className="text-xs text-slate-400 font-sans">ไม่มีรหัสผ่านสำรองที่บันทึกไว้ในอุปกรณ์นี้</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {savedPasswords.map((p, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                          <div className="space-y-0.5">
+                            <div className="text-xs font-extrabold text-slate-800 font-sans flex items-center gap-1">
+                              <User className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{p.name || 'เจ้าหน้าที่คณะ'}</span>
+                            </div>
+                            <div className="text-[9px] text-slate-400 font-mono truncate max-w-[150px]" title={p.hash}>
+                              แฮช: {p.hash.substring(0, 16)}...
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleDeletePassword(p.hash)}
+                            className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="ลบรหัสผ่านนี้"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordManager(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200/50 rounded-lg transition-colors cursor-pointer"
+                >
+                  ปิดหน้าต่าง
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* --- CUSTOM CONFIRMATION DIALOG --- */}
+      <AnimatePresence>
+        {confirmDialog && (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs"
+            id="custom-confirm-modal"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl max-w-sm w-full shadow-2xl p-6 border border-slate-100 space-y-4"
+            >
+              <div className="space-y-2 text-center">
+                <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-amber-500">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-black font-sans text-slate-800">{confirmDialog.title}</h3>
+                <p className="text-xs font-sans text-slate-500 leading-relaxed">{confirmDialog.message}</p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDialog(null)}
+                  className="flex-1 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 font-sans text-xs font-semibold cursor-pointer text-center"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    confirmDialog.onConfirm();
+                    setConfirmDialog(null);
+                  }}
+                  className="flex-1 py-2 bg-mangosteen hover:bg-opacity-90 text-white rounded-lg font-sans text-xs font-bold text-center cursor-pointer shadow-xs active:scale-[0.98]"
+                >
+                  ยืนยัน
+                </button>
               </div>
             </motion.div>
           </div>
